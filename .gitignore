@@ -61,7 +61,7 @@ ehthumbs.db
 Thumbs.db
 Desktop.ini
 
-# Logs
+## Logs
 logs
 *.log
 npm-debug.log*
