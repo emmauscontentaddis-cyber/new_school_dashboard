@@ -12,33 +12,70 @@ const sanitizeId = (value, label) => {
 }
 
 const fetchJson = async (url, options = {}) => {
-  const response = await fetch(url, {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
-  })
-
-  const payload = await response.json().catch(() => ({}))
-
-  if (!response.ok) {
-    throw new Error(payload?.error || 'Chat request failed')
-  }
-
-  // For POST requests, data is a single object, for GET it's an array
-  // Return the data directly, or empty array/object as fallback
-  if (payload?.data !== undefined) {
-    return payload.data
-  }
+  console.log('[fetchJson] Starting fetch to:', url, 'method:', options.method)
   
-  // If no data field but success is true, return the whole payload
-  if (payload?.success && payload?.data === undefined) {
-    return payload
+  try {
+    // Add AbortController for timeout
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 second timeout
+    
+    const fetchStartTime = Date.now()
+    const response = await fetch(url, {
+      credentials: 'include',
+      signal: controller.signal, // Add abort signal
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+      ...options,
+    })
+    
+    clearTimeout(timeoutId) // Clear timeout if request completes
+    const fetchDuration = Date.now() - fetchStartTime
+    
+    console.log('[fetchJson] Response received', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      duration: `${fetchDuration}ms`
+    })
+
+    const payload = await response.json().catch((err) => {
+      console.error('[fetchJson] Error parsing JSON:', err)
+      return {}
+    })
+
+    console.log('[fetchJson] Response payload:', payload)
+
+    if (!response.ok) {
+      const errorMsg = payload?.error || 'Chat request failed'
+      console.error('[fetchJson] Request failed:', errorMsg)
+      throw new Error(errorMsg)
+    }
+
+    // For POST requests, data is a single object, for GET it's an array
+    // Return the data directly, or empty array/object as fallback
+    if (payload?.data !== undefined) {
+      console.log('[fetchJson] Returning payload.data')
+      return payload.data
+    }
+    
+    // If no data field but success is true, return the whole payload
+    if (payload?.success && payload?.data === undefined) {
+      console.log('[fetchJson] Returning whole payload (success=true)')
+      return payload
+    }
+    
+    console.warn('[fetchJson] No data field found, returning empty array')
+    return []
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      console.error('[fetchJson] Request aborted due to timeout')
+      throw new Error('Request timeout: The server took too long to respond')
+    }
+    console.error('[fetchJson] Exception:', error)
+    throw error
   }
-  
-  return []
 }
 
 export async function getConversations({ schoolId, studentId, limit = 500 } = {}) {
@@ -84,72 +121,117 @@ export async function sendMessage({
   programId,
   programTitle,
   message,
+  schoolId: providedSchoolId, // Allow schoolId to be passed directly
+  userId: providedUserId, // Allow userId to be passed directly
 }) {
   try {
-    const schoolId = await getCachedSchoolId()
-    const userId = await getCachedUserId()
-
+    console.log('📝 [sendMessage] Sending school message via Supabase (like students)...', {
+      hasProvidedSchoolId: !!providedSchoolId,
+      hasProvidedUserId: !!providedUserId,
+      studentId,
+      timestamp: new Date().toISOString()
+    })
+    
+    // Use provided userId directly - no need to fetch from cache
+    const userId = providedUserId
+    if (!userId) {
+      throw new Error('User ID is required. Please provide userId in the message payload.')
+    }
+    
+    const schoolId = providedSchoolId
     if (!schoolId) {
-      throw new Error('Missing schoolId for chat message')
+      throw new Error('School ID is required. Please provide schoolId in the message payload.')
     }
 
-    const { data: { user }, error } = await supabase.auth.getUser()
-    if (error || !user) {
-      throw new Error('User is not authenticated')
-    }
+    // Get school name from database (quick query with timeout)
+    let schoolName = 'School' // Default fallback
+    try {
+      const fetchPromise = supabase
+        .from('schools')
+        .select('name')
+        .eq('id', schoolId)
+        .maybeSingle()
+      
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('School name fetch timeout')), 2000)
+      )
+      
+      const { data: schoolRecord } = await Promise.race([fetchPromise, timeoutPromise])
 
-    // Try multiple sources for school name
-    let schoolName = 
-      user.user_metadata?.school ||
-      user.user_metadata?.school_name ||
-      null
-
-    // If not in metadata, fetch from database
-    if (!schoolName) {
-      try {
-        const { data: schoolRecord, error: schoolError } = await supabase
-          .from('schools')
-          .select('name')
-          .eq('id', schoolId)
-          .maybeSingle()
-
-        if (schoolError) {
-          console.warn('Error fetching school name:', schoolError)
-        }
-
-        schoolName = schoolRecord?.name || null
-      } catch (err) {
-        console.warn('Exception fetching school name:', err)
+      if (schoolRecord?.name) {
+        schoolName = schoolRecord.name
+        console.log('[sendMessage] School name from DB:', schoolName)
+      } else {
+        console.warn(`[sendMessage] School name not found for schoolId ${schoolId}, using default`)
       }
+    } catch (err) {
+      console.warn('[sendMessage] Exception fetching school name (using default):', err.message || err)
+      // Continue with default 'School' name
     }
 
-    // Fallback to a default if still null
-    if (!schoolName || !schoolName.trim()) {
-      schoolName = 'School'
-      console.warn(`School name not found for schoolId ${schoolId}, using default`)
-    }
-
-    const payload = {
-      senderId: userId || user.id,
+    // Use API route instead of direct insert to avoid RLS issues
+    // The API route uses service role key which bypasses RLS
+    // No need to check session - API route handles authentication
+    console.log('[sendMessage] Sending via API route...', {
+      schoolId,
+      studentId,
+      schoolName,
+      messageLength: message.trim().length,
+      timestamp: new Date().toISOString()
+    })
+    
+    const insertStartTime = Date.now()
+    
+    const apiPayload = {
+      senderId: userId,
       senderType: 'school',
       receiverId: sanitizeId(studentId, 'studentId'),
       receiverType: 'student',
-      message,
-      schoolId,
-      studentId,
-      studentName,
-      studentEmail,
-      schoolName,
+      message: message.trim(),
+      schoolId: schoolId,
+      schoolName: schoolName, // Already fetched above
+      studentId: studentId,
+      studentName: studentName || 'Student',
+      studentEmail: studentEmail || null,
       programId: programId || null,
       programTitle: programTitle || null,
     }
-
-    return await fetchJson(CHAT_MESSAGES_ENDPOINT, {
+    
+    // fetchJson already has an 8-second timeout built in
+    const data = await fetchJson(CHAT_MESSAGES_ENDPOINT, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(apiPayload),
     })
+    
+    const insertDuration = Date.now() - insertStartTime
+    console.log('[sendMessage] API response received:', {
+      success: !!data,
+      duration: `${insertDuration}ms`,
+      messageId: data?.id,
+      hasData: !!data
+    })
+
+    // Validate response
+    if (!data) {
+      throw new Error('No data returned from API')
+    }
+
+    // Check if it's an error response
+    if (data.error) {
+      console.error('[sendMessage] API returned error:', data.error)
+      throw new Error(data.error || 'Failed to save message')
+    }
+
+    // Check if data has required fields
+    if (!data.id && !data.sender_id) {
+      console.error('[sendMessage] Invalid response data:', data)
+      throw new Error('Message was saved but invalid data returned')
+    }
+
+    console.log('✅ [sendMessage] Message sent successfully:', data.id)
+    return data
   } catch (error) {
-    console.error('Error sending chat message:', error)
+    console.error('[sendMessage] Error sending chat message:', error)
     throw error
   }
 }

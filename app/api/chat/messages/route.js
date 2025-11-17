@@ -53,21 +53,31 @@ const buildMessagePayload = async (body) => {
   const student = sanitizeId(studentId, 'studentId')
   const roomId = `${school}-${student}`
 
-  // Ensure school_name is never null - fetch it if not provided
-  let resolvedSchoolName = schoolName?.trim() || null
-  if (!resolvedSchoolName && senderType === 'school') {
-    // Fetch school name from database if not provided
-    try {
-      const { data: schoolRecord } = await supabase
-        .from('schools')
-        .select('name')
-        .eq('id', school)
-        .maybeSingle()
-      
-      resolvedSchoolName = schoolRecord?.name || 'School'
-    } catch (error) {
-      console.warn('Failed to fetch school name, using default:', error)
-      resolvedSchoolName = 'School'
+  // Ensure school_name is never null - use provided name or default
+  // Don't fetch from DB to avoid timeout - use provided value or default
+  let resolvedSchoolName = schoolName?.trim() || 'School'
+  
+  // Only fetch if absolutely necessary and name is missing
+  if (!resolvedSchoolName || resolvedSchoolName === 'School') {
+    if (senderType === 'school') {
+      // Quick fetch with timeout
+      try {
+        const fetchPromise = supabase
+          .from('schools')
+          .select('name')
+          .eq('id', school)
+          .maybeSingle()
+        
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('School name fetch timeout')), 2000)
+        )
+        
+        const { data: schoolRecord } = await Promise.race([fetchPromise, timeoutPromise])
+        resolvedSchoolName = schoolRecord?.name || 'School'
+      } catch (error) {
+        console.warn('Failed to fetch school name, using default:', error)
+        resolvedSchoolName = 'School'
+      }
     }
   }
 
@@ -95,39 +105,78 @@ const buildMessagePayload = async (body) => {
 }
 
 export async function POST(request) {
+  const startTime = Date.now()
   try {
+    console.log('[API] POST /api/chat/messages - Starting...', new Date().toISOString())
     const body = await request.json()
+    console.log('[API] Request body received:', { 
+      hasSenderId: !!body.senderId,
+      hasSchoolId: !!body.schoolId,
+      hasStudentId: !!body.studentId,
+      messageLength: body.message?.length
+    })
+    
+    const buildStartTime = Date.now()
     const payload = await buildMessagePayload(body)
+    const buildDuration = Date.now() - buildStartTime
+    console.log('[API] Payload built:', { duration: `${buildDuration}ms`, roomId: payload.room_id })
 
-    const { data, error } = await supabase
+    const insertStartTime = Date.now()
+    // Add timeout to Supabase insert
+    const insertPromise = supabase
       .from('student_messages')
       .insert(payload)
       .select()
       .single()
+    
+    const insertTimeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Supabase insert timeout after 5 seconds')), 5000)
+    )
+    
+    const { data, error } = await Promise.race([insertPromise, insertTimeoutPromise])
+    const insertDuration = Date.now() - insertStartTime
+    console.log('[API] Insert completed:', { 
+      success: !error, 
+      duration: `${insertDuration}ms`,
+      messageId: data?.id 
+    })
 
     if (error) {
-      console.error('Error inserting message:', error)
+      console.error('[API] Error inserting message:', error)
       return NextResponse.json(
         { error: 'Failed to save message', details: error.message },
         { status: 500 }
       )
     }
 
-    // Optional: notify socket server
+    // Optional: notify socket server (non-blocking, don't wait for it)
     const chatServerUrl = process.env.CHAT_SERVER_INTERNAL_URL
     if (chatServerUrl) {
+      // Fire and forget - don't wait for socket server
       fetch(`${chatServerUrl}/api/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }).catch((err) => {
-        console.warn('Chat server notification failed (non-critical):', err.message)
+        console.warn('[API] Chat server notification failed (non-critical):', err.message)
       })
     }
 
+    const totalDuration = Date.now() - startTime
+    console.log('[API] POST /api/chat/messages - SUCCESS', {
+      duration: `${totalDuration}ms`,
+      messageId: data.id,
+      timestamp: new Date().toISOString()
+    })
+    
     return NextResponse.json({ success: true, data })
   } catch (error) {
-    console.error('POST /api/chat/messages failed:', error)
+    const totalDuration = Date.now() - startTime
+    console.error('[API] POST /api/chat/messages - FAILED', {
+      duration: `${totalDuration}ms`,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    })
     return NextResponse.json({ error: error.message }, { status: 400 })
   }
 }

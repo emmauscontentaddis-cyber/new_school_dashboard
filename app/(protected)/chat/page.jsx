@@ -13,7 +13,7 @@ import {
 const getConversationKey = (studentId, programId) => `${studentId}-${programId || 'general'}`
 
 export default function ChatPage() {
-  const { schoolId } = useAuth()
+  const { schoolId, user } = useAuth()
   const [contacts, setContacts] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedConversation, setSelectedConversation] = useState(null)
@@ -21,6 +21,7 @@ export default function ChatPage() {
   const [messageText, setMessageText] = useState('')
   const [loadingContacts, setLoadingContacts] = useState(true)
   const [loadingMessages, setLoadingMessages] = useState(false)
+  const [isSending, setIsSending] = useState(false)
   const [socketStatus, setSocketStatus] = useState({ isConnected: false })
   const [error, setError] = useState(null)
   const messagesEndRef = useRef(null)
@@ -38,20 +39,76 @@ export default function ChatPage() {
   const uniqueMessages = useMemo(() => {
     const messageMap = new Map()
     messages.forEach(msg => {
-      if (msg.id && !messageMap.has(msg.id)) {
+      if (msg && msg.id && !messageMap.has(msg.id)) {
         messageMap.set(msg.id, msg)
       }
     })
     
-    return Array.from(messageMap.values())
+    const sorted = Array.from(messageMap.values())
       .sort((a, b) => {
-        const dateA = new Date(a.sent_at || 0)
-        const dateB = new Date(b.sent_at || 0)
+        const dateA = new Date(a.sent_at || a.sentAt || 0)
+        const dateB = new Date(b.sent_at || b.sentAt || 0)
         return dateA - dateB
       })
+    
+    console.log('🔄 [uniqueMessages] Computed', {
+      count: sorted.length,
+      timestamp: new Date().toISOString(),
+      messageIds: sorted.map(m => m.id)
+    })
+    return sorted
   }, [messages])
 
   useEffect(scrollToBottom, [uniqueMessages])
+
+  // Debug: Log when messages change
+  useEffect(() => {
+    console.log('📬 [Messages State] Updated', {
+      count: messages.length,
+      timestamp: new Date().toISOString(),
+      messageIds: messages.map(m => m.id),
+      lastMessage: messages.length > 0 ? {
+        id: messages[messages.length - 1].id,
+        message: messages[messages.length - 1].message?.substring(0, 50),
+        sender_type: messages[messages.length - 1].sender_type,
+        sent_at: messages[messages.length - 1].sent_at
+      } : null
+    })
+  }, [messages])
+
+  // Ensure input stays enabled when conversation is selected
+  useEffect(() => {
+    if (selectedConversation && inputRef.current) {
+      // Always ensure input reflects the correct state
+      const input = inputRef.current
+      const shouldBeEnabled = !loadingMessages && !isSending
+      
+      if (shouldBeEnabled) {
+        input.disabled = false
+        input.readOnly = false
+        input.style.pointerEvents = 'auto'
+        input.style.cursor = 'text'
+      } else {
+        // Only disable if actually loading or sending
+        input.disabled = loadingMessages || isSending
+        input.readOnly = loadingMessages || isSending
+        input.style.pointerEvents = (loadingMessages || isSending) ? 'none' : 'auto'
+        input.style.cursor = (loadingMessages || isSending) ? 'not-allowed' : 'text'
+      }
+    }
+  }, [selectedConversation, loadingMessages, isSending])
+  
+  // Safety mechanism: Reset isSending if it gets stuck
+  useEffect(() => {
+    if (!isSending) return
+
+    const timeout = setTimeout(() => {
+      console.warn('⚠️ isSending has been true for 5+ seconds, resetting...')
+      setIsSending(false)
+    }, 5000)
+
+    return () => clearTimeout(timeout)
+  }, [isSending])
 
   const loadContacts = useCallback(async () => {
     if (!schoolId) return
@@ -140,19 +197,57 @@ export default function ChatPage() {
       if (!message || !message.id || !schoolId) return
       if (message.school_id !== schoolId) return
       
-      // Ignore messages sent by the school (we already added them locally)
-      // Only process messages from students
-      if (message.sender_type === 'school') {
-        console.log('Ignoring echo of own message:', message.id)
-        return
-      }
-
       // Check if we've already processed this message ID recently
       if (processedMessageIdsRef.current.has(message.id)) {
         console.log('Ignoring duplicate message:', message.id)
         return
       }
 
+      // For school messages, only process if we're in the correct conversation
+      // This allows socket echoes to update the UI if the API response was incomplete
+      if (message.sender_type === 'school') {
+        const currentProgramKey = selectedConversation?.programId || 'general'
+        const messageProgramKey = message.program_id || 'general'
+        const isCurrentConversation = 
+          selectedConversation &&
+          selectedConversation.studentId === message.student_id &&
+          currentProgramKey === messageProgramKey
+        
+        if (!isCurrentConversation) {
+          // Not in the current conversation, ignore
+          return
+        }
+        
+        // Check if message already exists in state
+        setMessages((prev) => {
+          const exists = prev.some(m => m.id === message.id)
+          if (exists) {
+            // Already exists, ignore
+            return prev
+          }
+          
+          // Add the message (socket echo might have more complete data)
+          const messageMap = new Map(prev.map(m => [m.id, m]))
+          messageMap.set(message.id, message)
+          const sorted = Array.from(messageMap.values()).sort((a, b) => {
+            const dateA = new Date(a.sent_at || 0)
+            const dateB = new Date(b.sent_at || 0)
+            return dateA - dateB
+          })
+          return sorted
+        })
+        
+        // Mark as processed
+        processedMessageIdsRef.current.add(message.id)
+        setTimeout(() => {
+          processedMessageIdsRef.current.delete(message.id)
+        }, 5 * 60 * 1000)
+        
+        upsertContactFromMessage(message)
+        return
+      }
+
+      // Process student messages
       console.log('Received incoming message from student:', message.id)
       
       // Mark as processed
@@ -194,19 +289,29 @@ export default function ChatPage() {
         }
         
         // Ensure input stays focused and enabled after receiving a message
-        setTimeout(() => {
-          if (inputRef.current) {
-            const wasFocused = document.activeElement === inputRef.current
-            const hasText = inputRef.current.value.trim().length > 0
-            
-            if (wasFocused || hasText) {
-              inputRef.current.focus()
+        // Don't interfere if we're currently sending
+        if (!isSending) {
+          setTimeout(() => {
+            if (inputRef.current && !loadingMessages && !isSending) {
+              // Ensure input is enabled
+              inputRef.current.disabled = false
+              inputRef.current.readOnly = false
+              inputRef.current.style.pointerEvents = 'auto'
+              inputRef.current.style.cursor = 'text'
+              
+              // Refocus if it was focused or has text
+              const wasFocused = document.activeElement === inputRef.current
+              const hasText = inputRef.current.value.trim().length > 0
+              
+              if (wasFocused || hasText) {
+                inputRef.current.focus()
+              }
             }
-          }
-        }, 100)
+          }, 100)
+        }
       }
     },
-    [schoolId, selectedConversation, upsertContactFromMessage]
+    [schoolId, selectedConversation, upsertContactFromMessage, isSending]
   )
 
   useEffect(() => {
@@ -218,11 +323,13 @@ export default function ChatPage() {
 
     socketService.onNewMessage(handleIncomingMessage)
     socketService.onNewStudentMessage(handleIncomingMessage)
+    socketService.onNewReply(handleIncomingMessage)
 
     return () => {
       clearInterval(interval)
       socketService.offNewMessage(handleIncomingMessage)
       socketService.offNewStudentMessage(handleIncomingMessage)
+      socketService.offNewReply(handleIncomingMessage)
       socketService.disconnect()
     }
   }, [handleIncomingMessage, schoolId])
@@ -280,53 +387,90 @@ export default function ChatPage() {
   )
 
   const handleSendMessage = async (event) => {
+    const startTime = Date.now()
+    console.log('🚀 [handleSendMessage] START', new Date().toISOString())
     event.preventDefault()
+    
+    // Prevent double submission
+    if (isSending) {
+      console.warn('⚠️ [handleSendMessage] Already sending, ignoring duplicate request')
+      return
+    }
     
     // Validate inputs
     if (!messageText.trim()) {
-      console.warn('Cannot send: message is empty')
+      console.warn('❌ [handleSendMessage] Cannot send: message is empty')
       return
     }
     
     if (!selectedConversation) {
-      console.warn('Cannot send: no conversation selected')
+      console.warn('❌ [handleSendMessage] Cannot send: no conversation selected')
       setError('Please select a conversation first')
       return
     }
     
     if (!schoolId) {
-      console.warn('Cannot send: schoolId is missing')
+      console.warn('❌ [handleSendMessage] Cannot send: schoolId is missing')
       setError('School ID is missing')
       return
     }
 
     const messageToSend = messageText.trim()
-    console.log('Sending message:', { 
+    
+    // Set sending state and clear input immediately for better UX
+    setIsSending(true)
+    setMessageText('')
+    setError(null)
+    console.log('📤 [handleSendMessage] Preparing to send:', { 
       messageLength: messageToSend.length,
+      messagePreview: messageToSend.substring(0, 50),
       studentId: selectedConversation.studentId,
-      hasConversation: !!selectedConversation
+      studentName: selectedConversation.studentName,
+      hasConversation: !!selectedConversation,
+      currentMessagesCount: messages.length
     })
 
     try {
-      console.log('Calling sendChatMessage with:', {
+      console.log('📡 [handleSendMessage] Calling sendChatMessage API...', {
         studentId: selectedConversation.studentId,
         studentName: selectedConversation.studentName,
-        messageLength: messageToSend.length
+        studentEmail: selectedConversation.studentEmail,
+        programId: selectedConversation.programId,
+        programTitle: selectedConversation.programTitle,
+        messageLength: messageToSend.length,
+        timestamp: new Date().toISOString()
       })
 
-      const saved = await sendChatMessage({
+      // Add timeout to prevent hanging
+      const sendPromise = sendChatMessage({
         studentId: selectedConversation.studentId,
         studentName: selectedConversation.studentName,
         studentEmail: selectedConversation.studentEmail,
         programId: selectedConversation.programId,
         programTitle: selectedConversation.programTitle,
         message: messageToSend,
+        schoolId: schoolId, // Pass schoolId directly to avoid refetching
+        userId: user?.id || null, // Pass userId from context to avoid refetching
       })
 
-      console.log('Response from sendChatMessage:', saved)
-      console.log('Type of saved:', typeof saved)
-      console.log('Is array?', Array.isArray(saved))
-      console.log('Saved message ID:', saved?.id)
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Message send timeout after 10 seconds')), 10000)
+      })
+
+      const apiCallStart = Date.now()
+      const saved = await Promise.race([sendPromise, timeoutPromise])
+      const apiCallDuration = Date.now() - apiCallStart
+      
+      console.log('✅ [handleSendMessage] API Response received', {
+        duration: `${apiCallDuration}ms`,
+        timestamp: new Date().toISOString(),
+        response: saved,
+        type: typeof saved,
+        isArray: Array.isArray(saved),
+        hasId: !!saved?.id,
+        messageId: saved?.id,
+        fullResponse: JSON.stringify(saved, null, 2)
+      })
 
       // Validate that we got a valid response - check for array (empty response)
       if (Array.isArray(saved)) {
@@ -343,73 +487,165 @@ export default function ChatPage() {
         throw new Error('Invalid response from server: message object missing required fields (id or sender_id). Message was not saved.')
       }
 
-      console.log('Validation passed, clearing input and updating UI')
+      console.log('✅ [handleSendMessage] Validation passed, preparing to update UI')
+      console.log('📋 [handleSendMessage] Saved message object:', JSON.stringify(saved, null, 2))
+      console.log('📊 [handleSendMessage] Current state:', {
+        messagesCount: messages.length,
+        messageIds: messages.map(m => m.id),
+        timestamp: new Date().toISOString()
+      })
 
-      // Only clear input after successful send and validation
-      setMessageText('')
-
-      // Mark as processed to prevent duplicates
-      if (saved?.id) {
-        processedMessageIdsRef.current.add(saved.id)
+      // Normalize message format to ensure it has all required fields
+      const normalizedMessage = {
+        ...saved,
+        id: saved.id || saved.sender_id,
+        message: saved.message || saved.text || messageToSend,
+        sent_at: saved.sent_at || saved.sentAt || new Date().toISOString(),
+        sender_type: saved.sender_type || 'school',
+        student_id: saved.student_id || selectedConversation.studentId,
+        program_id: saved.program_id || selectedConversation.programId,
       }
 
+      console.log('🔄 [handleSendMessage] Normalized message:', {
+        id: normalizedMessage.id,
+        message: normalizedMessage.message?.substring(0, 50),
+        sent_at: normalizedMessage.sent_at,
+        sender_type: normalizedMessage.sender_type,
+        student_id: normalizedMessage.student_id,
+        program_id: normalizedMessage.program_id,
+        fullMessage: JSON.stringify(normalizedMessage, null, 2)
+      })
+
+      // Add message to state FIRST, before marking as processed
+      console.log('🔄 [handleSendMessage] Calling setMessages to update state...')
       setMessages((prev) => {
+        console.log('📝 [setMessages] State update function called', {
+          prevCount: prev.length,
+          prevIds: prev.map(m => m.id),
+          newMessageId: normalizedMessage.id,
+          timestamp: new Date().toISOString()
+        })
+        
         // Use Map for efficient deduplication
         const messageMap = new Map(prev.map(m => [m.id, m]))
         
-        // Only add if it doesn't exist
-        if (saved?.id && !messageMap.has(saved.id)) {
-          messageMap.set(saved.id, saved)
+        console.log('🔍 [setMessages] Checking for duplicates:', {
+          existingIds: Array.from(messageMap.keys()),
+          newId: normalizedMessage.id,
+          alreadyExists: messageMap.has(normalizedMessage.id),
+          hasValidId: !!normalizedMessage?.id
+        })
+        
+        // Always add the message if it has an ID (even if it exists, update it)
+        if (normalizedMessage?.id) {
+          console.log('➕ [setMessages] Adding/updating message in state')
+          messageMap.set(normalizedMessage.id, normalizedMessage)
           const sorted = Array.from(messageMap.values()).sort((a, b) => {
-            const dateA = new Date(a.sent_at || 0)
-            const dateB = new Date(b.sent_at || 0)
+            const dateA = new Date(a.sent_at || a.sentAt || 0)
+            const dateB = new Date(b.sent_at || b.sentAt || 0)
             return dateA - dateB
           })
+          console.log('✅ [setMessages] State update complete', {
+            newCount: sorted.length,
+            allIds: sorted.map(m => m.id),
+            lastMessage: sorted[sorted.length - 1] ? {
+              id: sorted[sorted.length - 1].id,
+              message: sorted[sorted.length - 1].message?.substring(0, 50),
+              sent_at: sorted[sorted.length - 1].sent_at
+            } : null,
+            timestamp: new Date().toISOString()
+          })
           return sorted
+        } else {
+          console.error('❌ [setMessages] Message not added - missing ID!', normalizedMessage)
+          return prev
         }
-        
-        return prev
       })
-      setError(null)
-      upsertContactFromMessage(saved)
+
+      // Mark as processed AFTER adding to state (with a small delay to ensure state update)
+      if (normalizedMessage?.id) {
+        // Use setTimeout to ensure state update completes first
+        setTimeout(() => {
+          processedMessageIdsRef.current.add(normalizedMessage.id)
+        }, 100)
+      }
       
-      // Send via socket for real-time delivery
+      setError(null)
+      console.log('📞 [handleSendMessage] Updating contact list...')
+      upsertContactFromMessage(normalizedMessage)
+      
+      // Send via socket for real-time delivery (if not already sent by API)
+      // The API route should notify the socket server, but we send here as backup
+      console.log('🔌 [handleSendMessage] Sending via socket...', {
+        messageId: normalizedMessage.id,
+        studentId: normalizedMessage.student_id,
+        timestamp: new Date().toISOString()
+      })
       try {
-        socketService.sendMessage({
-          senderId: saved.sender_id,
-          senderType: saved.sender_type,
-          receiverId: saved.receiver_id,
-          receiverType: saved.receiver_type,
-          message: saved.message,
-          schoolId: saved.school_id,
-          studentId: saved.student_id,
-          studentName: saved.student_name,
-          studentEmail: saved.student_email,
-          schoolName: saved.school_name,
-          programId: saved.program_id,
-          programTitle: saved.program_title,
-        })
+        const socketPayload = {
+          senderId: normalizedMessage.sender_id || normalizedMessage.senderId,
+          senderType: normalizedMessage.sender_type || 'school',
+          receiverId: normalizedMessage.receiver_id || normalizedMessage.receiverId,
+          receiverType: normalizedMessage.receiver_type || 'student',
+          message: normalizedMessage.message,
+          schoolId: normalizedMessage.school_id || schoolId,
+          studentId: normalizedMessage.student_id || selectedConversation.studentId,
+          studentName: normalizedMessage.student_name || selectedConversation.studentName,
+          studentEmail: normalizedMessage.student_email || selectedConversation.studentEmail,
+          schoolName: normalizedMessage.school_name || normalizedMessage.schoolName,
+          programId: normalizedMessage.program_id || selectedConversation.programId,
+          programTitle: normalizedMessage.program_title || selectedConversation.programTitle,
+        }
+        console.log('📡 [handleSendMessage] Socket payload:', socketPayload)
+        socketService.sendMessage(socketPayload)
+        console.log('✅ [handleSendMessage] Socket message sent successfully')
       } catch (socketError) {
-        console.warn('Socket send failed (non-critical):', socketError)
+        console.warn('⚠️ [handleSendMessage] Socket send failed (non-critical):', socketError)
         // Don't fail the whole operation if socket fails
       }
       
-      // Keep input focused after sending
+      const totalDuration = Date.now() - startTime
+      console.log('🎉 [handleSendMessage] COMPLETE', {
+        totalDuration: `${totalDuration}ms`,
+        messageId: normalizedMessage.id,
+        timestamp: new Date().toISOString()
+      })
+      
+      // Keep input focused and enabled after sending
       setTimeout(() => {
         if (inputRef.current) {
+          inputRef.current.disabled = false
+          inputRef.current.readOnly = false
+          inputRef.current.style.pointerEvents = 'auto'
+          inputRef.current.style.cursor = 'text'
           inputRef.current.focus()
         }
       }, 100)
     } catch (error) {
-      console.error('Failed to send message:', error)
-      console.error('Error details:', {
+      const errorDuration = Date.now() - startTime
+      console.error('❌ [handleSendMessage] FAILED', {
+        duration: `${errorDuration}ms`,
+        timestamp: new Date().toISOString(),
+        error: error
+      })
+      console.error('❌ [handleSendMessage] Error details:', {
         message: error.message,
         stack: error.stack,
-        name: error.name
+        name: error.name,
+        error: error,
+        fullError: JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
       })
       
       // Show error to user - make it visible
-      const errorMessage = error.message || 'Unable to send message. Please try again.'
+      let errorMessage = 'Unable to send message. Please try again.'
+      if (error.message) {
+        errorMessage = error.message
+      } else if (error.error) {
+        errorMessage = error.error
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
       setError(errorMessage)
       
       // Restore message text on error so user doesn't lose it
@@ -423,12 +659,19 @@ export default function ChatPage() {
         }
       }, 100)
       
-      // Keep input focused even on error
+      // Keep input focused and enabled even on error
       setTimeout(() => {
         if (inputRef.current) {
+          inputRef.current.disabled = false
+          inputRef.current.readOnly = false
+          inputRef.current.style.pointerEvents = 'auto'
+          inputRef.current.style.cursor = 'text'
           inputRef.current.focus()
         }
       }, 100)
+    } finally {
+      // Always reset sending state
+      setIsSending(false)
     }
   }
 
@@ -861,15 +1104,16 @@ export default function ChatPage() {
                     onChange={(e) => setMessageText(e.target.value)}
                     onKeyDown={(e) => {
                       // Allow Enter to submit
-                      if (e.key === 'Enter' && !e.shiftKey) {
+                      if (e.key === 'Enter' && !e.shiftKey && !isSending) {
                         e.preventDefault()
-                        if (messageText.trim() && selectedConversation) {
+                        if (messageText.trim() && selectedConversation && !loadingMessages && !isSending) {
                           handleSendMessage(e)
                         }
                       }
                     }}
                     autoFocus
-                    disabled={false}
+                    disabled={loadingMessages || isSending}
+                    readOnly={loadingMessages || isSending}
                     style={{
                       flex: 1,
                       border: 'none',
@@ -878,34 +1122,47 @@ export default function ChatPage() {
                       backgroundColor: 'transparent',
                       color: '#0f172a',
                       padding: '10px 0',
+                      pointerEvents: (loadingMessages || isSending) ? 'none' : 'auto',
+                      cursor: (loadingMessages || isSending) ? 'not-allowed' : 'text',
                     }}
                   />
                   <button
                     type="submit"
-                    disabled={!messageText.trim()}
+                    disabled={!messageText.trim() || loadingMessages || isSending}
+                    onClick={(e) => {
+                      // Backup handler in case form submission doesn't work
+                      if (messageText.trim() && selectedConversation && !loadingMessages && !isSending) {
+                        e.preventDefault()
+                        handleSendMessage(e)
+                      }
+                    }}
                     style={{
-                      backgroundColor: messageText.trim() ? '#1e40af' : '#cbd5e1',
+                      backgroundColor: (messageText.trim() && !loadingMessages && !isSending) ? '#1e40af' : '#cbd5e1',
                       color: '#ffffff',
                       border: 'none',
                       borderRadius: 4,
                       padding: '10px 24px',
-                      cursor: messageText.trim() ? 'pointer' : 'not-allowed',
+                      cursor: (messageText.trim() && !loadingMessages && !isSending) ? 'pointer' : 'not-allowed',
                       fontSize: 14,
                       fontWeight: 600,
                       transition: 'background-color 0.2s',
+                      pointerEvents: (loadingMessages || isSending) ? 'none' : 'auto',
+                      opacity: (messageText.trim() && !loadingMessages && !isSending) ? 1 : 0.6,
                     }}
                     onMouseEnter={(e) => {
-                      if (messageText.trim()) {
+                      if (messageText.trim() && !loadingMessages && !isSending) {
                         e.currentTarget.style.backgroundColor = '#1e3a8a'
+                        e.currentTarget.style.opacity = '1'
                       }
                     }}
                     onMouseLeave={(e) => {
-                      if (messageText.trim()) {
+                      if (messageText.trim() && !loadingMessages && !isSending) {
                         e.currentTarget.style.backgroundColor = '#1e40af'
+                        e.currentTarget.style.opacity = '1'
                       }
                     }}
                   >
-                    Send
+                    {isSending ? 'Sending...' : 'Send'}
                   </button>
                 </div>
               </form>
