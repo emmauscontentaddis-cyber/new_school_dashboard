@@ -1,166 +1,284 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useRef } from 'react'
-import ChatList from '@/components/chat/ChatList'
-import ChatWindow from '@/components/chat/ChatWindow'
-import { useChat } from '@/context/ChatContext'
-import { supabase } from '@/lib/supabase'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
+import ConversationList from '@/components/chat/ConversationList'
+import ChatWindow from '@/components/chat/ChatWindow'
+import socketService from '@/services/socketService'
+import {
+  getConversations,
+  getMessages,
+  sendMessage as sendChatMessage,
+  markMessagesAsRead,
+} from '@/services/chat'
 
-const Spinner = ({ size = 'md', text }) => {
-  const sizeClasses = {
-    sm: 'w-4 h-4',
-    md: 'w-6 h-6',
-    lg: 'w-8 h-8',
-  }
-  return (
-    <div className="flex flex-col items-center justify-center gap-3">
-      <div className={`${sizeClasses[size]} border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin`}></div>
-      {text && <div className="text-sm text-gray-600">{text}</div>}
-    </div>
-  )
-}
+const getConversationKey = (studentId, programId) => `${studentId}-${programId || 'general'}`
 
 export default function ChatPage() {
-  const { contacts, selectedContact, loading, error, fetchConversations } = useChat()
   const { schoolId } = useAuth()
-  const hasFetchedRef = useRef(false)
+  const [conversations, setConversations] = useState([])
+  const [selectedConversation, setSelectedConversation] = useState(null)
+  const [messages, setMessages] = useState([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [loadingConversations, setLoadingConversations] = useState(true)
+  const [loadingMessages, setLoadingMessages] = useState(false)
+  const [isSending, setIsSending] = useState(false)
+  const [socketStatus, setSocketStatus] = useState({ isConnected: false })
+  const [error, setError] = useState(null)
 
-  useLayoutEffect(() => {
-    if (schoolId && !hasFetchedRef.current) {
-      hasFetchedRef.current = true
-      fetchConversations()
+  const loadConversations = useCallback(async () => {
+    if (!schoolId) return
+    setLoadingConversations(true)
+    try {
+      const data = await getConversations({ schoolId })
+      setConversations(data)
+      setError(null)
+    } catch (error) {
+      console.error('Failed to load conversations:', error)
+      setError(error.message || 'Unable to load conversations')
+    } finally {
+      setLoadingConversations(false)
     }
-  }, [schoolId, fetchConversations])
+  }, [schoolId])
 
-  useEffect(() => {
-    const handleChatNavClick = () => {
-      fetchConversations()
-    }
-
-    window.addEventListener('chat-nav-clicked', handleChatNavClick)
-    return () => {
-      window.removeEventListener('chat-nav-clicked', handleChatNavClick)
-    }
-  }, [fetchConversations])
-
-  useEffect(() => {
-    let channel = null
-    let pollIntervalId = null
-    let refreshIntervalId = null
-    
-    const channelName = `student_messages_${Date.now()}`
-    
-    const stopPolling = () => {
-      if (pollIntervalId) {
-        clearInterval(pollIntervalId)
-        pollIntervalId = null
+  const loadMessages = useCallback(
+    async (conversation) => {
+      if (!conversation || !schoolId) return
+      setLoadingMessages(true)
+      try {
+        const data = await getMessages({
+          schoolId,
+          studentId: conversation.studentId,
+        })
+        setMessages(data)
+        setError(null)
+        await markMessagesAsRead({
+          schoolId,
+          studentId: conversation.studentId,
+        })
+        setConversations((prev) =>
+          prev.map((item) =>
+            item.conversationId === conversation.conversationId
+              ? { ...item, unreadCount: 0 }
+              : item
+          )
+        )
+      } catch (error) {
+        console.error('Failed to load messages:', error)
+        setError(error.message || 'Unable to load messages')
+      } finally {
+        setLoadingMessages(false)
       }
+    },
+    [schoolId]
+  )
+
+  const handleConversationSelect = async (conversation) => {
+    setSelectedConversation(conversation)
+    await loadMessages(conversation)
+    if (schoolId && conversation) {
+      socketService.joinConversationRoom(schoolId, conversation.studentId)
     }
-    
-    const startPolling = () => {
-      if (!pollIntervalId) {
-        pollIntervalId = setInterval(() => {
-          fetchConversations(true)
-        }, 10000)
-      }
-    }
-    
-    // Auto-refresh every 0.1 seconds (100ms)
-    const startAutoRefresh = () => {
-      if (!refreshIntervalId) {
-        refreshIntervalId = setInterval(() => {
-          fetchConversations(true)
-          // Also refresh messages if a conversation is selected
-          if (selectedContact) {
-            // Trigger a silent refresh of messages
-            const event = new CustomEvent('refresh-messages')
-            window.dispatchEvent(event)
+  }
+
+  const upsertConversationFromMessage = useCallback(
+    (message) => {
+      setConversations((prev) => {
+        const conversationId = getConversationKey(message.student_id, message.program_id)
+        const existing = prev.find((item) => item.conversationId === conversationId)
+        const lastMessage = {
+          text: message.message,
+          senderType: message.sender_type,
+          messageType: message.message_type,
+          sentAt: message.sent_at,
+        }
+
+        if (!existing) {
+          return [
+            {
+              conversationId,
+              studentId: message.student_id,
+              studentName: message.student_name,
+              studentEmail: message.student_email,
+              programId: message.program_id,
+              programTitle: message.program_title,
+              schoolId: message.school_id,
+              schoolName: message.school_name,
+              roomId: message.room_id,
+              lastMessage,
+              unreadCount: message.receiver_type === 'school' ? 1 : 0,
+            },
+            ...prev,
+          ]
+        }
+
+        return prev.map((item) => {
+          if (item.conversationId !== conversationId) {
+            return item
           }
-        }, 100) // 0.1 seconds = 100ms
+
+          const unreadIncrement =
+            message.receiver_type === 'school' &&
+            (!selectedConversation || selectedConversation.conversationId !== conversationId)
+              ? 1
+              : 0
+
+          return {
+            ...item,
+            lastMessage,
+            unreadCount: Math.max(0, item.unreadCount + unreadIncrement),
+          }
+        })
+      })
+    },
+    [selectedConversation]
+  )
+
+  const handleIncomingMessage = useCallback(
+    (message) => {
+      if (!message || message.school_id !== schoolId) {
+        return
       }
-    }
-    
-    const stopAutoRefresh = () => {
-      if (refreshIntervalId) {
-        clearInterval(refreshIntervalId)
-        refreshIntervalId = null
+
+      upsertConversationFromMessage(message)
+
+      if (
+        selectedConversation &&
+        selectedConversation.studentId === message.student_id
+      ) {
+        setMessages((prev) => [...prev, message])
+        if (message.receiver_type === 'school') {
+          markMessagesAsRead({ schoolId, studentId: message.student_id }).catch(() => {})
+        }
       }
-    }
-    
-    channel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'student_messages'
-        },
-        (payload) => {
-          fetchConversations(true)
-        }
-      )
-      .subscribe((status, err) => {
-        if (err) {
-          console.error('Subscription error:', err)
-        }
-        
-        if (status === 'SUBSCRIBED') {
-          stopPolling()
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          startPolling()
-        }
+    },
+    [schoolId, selectedConversation, upsertConversationFromMessage]
+  )
+
+  const handleSendMessage = async (text) => {
+    if (!selectedConversation) return
+
+    setIsSending(true)
+    try {
+      const saved = await sendChatMessage({
+        studentId: selectedConversation.studentId,
+        studentName: selectedConversation.studentName,
+        studentEmail: selectedConversation.studentEmail,
+        programId: selectedConversation.programId,
+        programTitle: selectedConversation.programTitle,
+        message: text,
       })
 
-    startPolling()
-    startAutoRefresh()
+      setMessages((prev) => [...prev, saved])
+      setError(null)
+      upsertConversationFromMessage(saved)
+      socketService.sendMessage({
+        senderId: saved.sender_id,
+        senderType: saved.sender_type,
+        receiverId: saved.receiver_id,
+        receiverType: saved.receiver_type,
+        message: saved.message,
+        schoolId: saved.school_id,
+        studentId: saved.student_id,
+        studentName: saved.student_name,
+        studentEmail: saved.student_email,
+        schoolName: saved.school_name,
+        programId: saved.program_id,
+        programTitle: saved.program_title,
+      })
+    } catch (error) {
+      console.error('Failed to send message:', error)
+      setError(error.message || 'Unable to send message')
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const refreshMessages = useCallback(() => {
+    if (selectedConversation) {
+      loadMessages(selectedConversation)
+    }
+  }, [loadMessages, selectedConversation])
+
+  useEffect(() => {
+    if (!schoolId) return
+    loadConversations()
+  }, [loadConversations, schoolId])
+
+  useEffect(() => {
+    if (!schoolId) return
+
+    socketService.connect({ schoolId })
+
+    const interval = setInterval(() => {
+      setSocketStatus(socketService.getConnectionStatus())
+    }, 2000)
+
+    const messageHandler = (payload) => handleIncomingMessage(payload)
+    socketService.onNewMessage(messageHandler)
+    socketService.onNewStudentMessage(messageHandler)
 
     return () => {
-      if (channel) {
-        supabase.removeChannel(channel)
-      }
-      stopPolling()
-      stopAutoRefresh()
+      clearInterval(interval)
+      socketService.offNewMessage(messageHandler)
+      socketService.offNewStudentMessage(messageHandler)
+      socketService.disconnect()
     }
-  }, [fetchConversations, selectedContact])
+  }, [schoolId, handleIncomingMessage])
+
+  const hasSelection = Boolean(selectedConversation)
+
+  const currentMessages = useMemo(() => {
+    if (loadingMessages) {
+      return []
+    }
+    return messages
+  }, [loadingMessages, messages])
 
   return (
-    <div className="h-[calc(100vh-2rem)] flex gap-4">
-      {/* Chat List Sidebar */}
-      <div className="w-80 flex-shrink-0 bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col">
-        <div className="p-4 border-b border-gray-200 flex-shrink-0">
-          <h2 className="text-lg font-semibold text-gray-900">Conversations</h2>
+    <div className="flex h-full flex-col gap-4">
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+          {error}
         </div>
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading && contacts.length === 0 ? (
-            <Spinner size="md" text="Loading conversations..." />
-          ) : error ? (
-            <div className="text-red-600 text-sm">{error}</div>
-          ) : (
-            <ChatList />
-          )}
-        </div>
+      )}
+      <div className="flex h-full min-h-[calc(100vh-160px)] rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="w-full max-w-sm">
+        <ConversationList
+          conversations={conversations}
+          selectedConversationId={selectedConversation?.conversationId}
+          onSelect={handleConversationSelect}
+          loading={loadingConversations}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+        />
       </div>
 
-      {/* Chat Window */}
-      <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-        {selectedContact ? (
-          <ChatWindow contact={selectedContact} />
+      <div className="flex flex-1 flex-col">
+        {hasSelection ? (
+          <ChatWindow
+            conversation={selectedConversation}
+            messages={currentMessages}
+            onSendMessage={handleSendMessage}
+            isSending={isSending}
+            onRefresh={refreshMessages}
+            connectionStatus={socketStatus}
+          />
         ) : (
-          <div className="flex items-center justify-center h-full bg-gray-50">
+          <div className="flex flex-1 items-center justify-center">
             <div className="text-center">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-200 flex items-center justify-center">
-                <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-              </div>
-              <div className="text-gray-900 font-medium mb-1">Select a conversation</div>
-              <div className="text-sm text-gray-500">Choose a student from the sidebar to view messages</div>
+              <p className="text-lg font-semibold text-gray-900">
+                Select a conversation to begin
+              </p>
+              <p className="mt-2 text-gray-500">
+                Students who apply to your programs will appear in the sidebar.
+              </p>
             </div>
           </div>
         )}
       </div>
     </div>
+    </div>
   )
 }
+

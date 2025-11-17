@@ -1,193 +1,154 @@
-import { getCachedSchoolId, getCachedUser, getCachedProfile } from '@/utils/userCache'
+import { supabase } from '@/lib/supabase'
+import { getCachedSchoolId, getCachedUserId } from '@/utils/userCache'
 
-// Base API URL - works in both client and server
-const getApiUrl = () => {
-  if (typeof window !== 'undefined') {
-    return window.location.origin
+const CHAT_MESSAGES_ENDPOINT = '/api/chat/messages'
+const CHAT_CONVERSATIONS_ENDPOINT = '/api/chat/conversations'
+
+const sanitizeId = (value, label) => {
+  if (!value || typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${label} is required`)
   }
-  return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  return value.trim()
 }
 
-/**
- * Helper to get current user's school_id (UUID) - uses cache
- */
-async function getUserSchoolId() {
-  return await getCachedSchoolId()
-}
+const fetchJson = async (url, options = {}) => {
+  const response = await fetch(url, {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    ...options,
+  })
 
-/**
- * Helper to get current user info - uses cache
- */
-async function getCurrentUser() {
-  try {
-    const user = await getCachedUser()
-    if (user) {
-      const profile = await getCachedProfile()
-      return {
-        id: user.id,
-        email: user.email || profile?.email || null,
-        name: profile?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'School Staff'
-      }
-    }
-    return null
-  } catch (error) {
-    console.error('Error in getCurrentUser:', error)
-    return null
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    throw new Error(payload?.error || 'Chat request failed')
   }
+
+  return payload?.data ?? []
 }
 
-/**
- * Optimized fetch wrapper with AbortController support
- */
-async function fetchWithAbort(url, options = {}) {
-  const { signal, ...fetchOptions } = options
-  
-  const controller = signal || new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 20000) // 20s timeout
-
+export async function getConversations({ schoolId, studentId, limit = 500 } = {}) {
   try {
-    const response = await fetch(url, {
-      ...fetchOptions,
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        ...fetchOptions.headers,
-      },
-    })
+    const resolvedSchoolId = sanitizeId(schoolId || (await getCachedSchoolId()), 'schoolId')
+    const params = new URLSearchParams({ schoolId: resolvedSchoolId })
 
-    clearTimeout(timeoutId)
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }))
-      throw new Error(error.error || `HTTP ${response.status}`)
+    if (studentId) {
+      params.set('studentId', studentId)
     }
 
-    return await response.json()
+    if (limit) {
+      params.set('limit', String(limit))
+    }
+
+    return await fetchJson(`${CHAT_CONVERSATIONS_ENDPOINT}?${params.toString()}`)
   } catch (error) {
-    clearTimeout(timeoutId)
-    if (error.name === 'AbortError') {
-      throw new Error('Request timed out. Please try again.')
-    }
+    console.error('Error loading conversations:', error)
     throw error
   }
 }
 
-/**
- * Get messages grouped by student (for chat contacts list)
- * 
- * OPTIMIZED VERSION:
- * - Uses optimized API route with database-level grouping
- * - Supports AbortController for cancellation
- * - Minimal data transfer
- * - Sub-300ms target performance
- */
-export async function getMessagesGroupedByStudent(options = {}) {
+export async function getMessages({ schoolId, studentId }) {
   try {
-    const schoolId = await getUserSchoolId()
-    
+    const resolvedSchoolId = sanitizeId(schoolId || (await getCachedSchoolId()), 'schoolId')
+    const resolvedStudentId = sanitizeId(studentId, 'studentId')
+    const params = new URLSearchParams({
+      schoolId: resolvedSchoolId,
+      studentId: resolvedStudentId,
+    })
+
+    return await fetchJson(`${CHAT_MESSAGES_ENDPOINT}?${params.toString()}`)
+  } catch (error) {
+    console.error('Error loading chat messages:', error)
+    throw error
+  }
+}
+
+export async function sendMessage({
+  studentId,
+  studentName,
+  studentEmail,
+  programId,
+  programTitle,
+  message,
+}) {
+  try {
+    const schoolId = await getCachedSchoolId()
+    const userId = await getCachedUserId()
+
     if (!schoolId) {
-      console.log('❌ No school ID found, returning empty array')
-      return []
+      throw new Error('Missing schoolId for chat message')
     }
 
-    const apiUrl = getApiUrl()
-    const url = new URL(`${apiUrl}/api/chat/conversations`)
-    url.searchParams.set('school_id', schoolId)
-
-    const contacts = await fetchWithAbort(url.toString(), {
-      method: 'GET',
-      signal: options.signal,
-      cache: options.cache || 'default',
-    })
-
-    return contacts || []
-  } catch (error) {
-    console.error('Error fetching conversations:', error)
-    throw error
-  }
-}
-
-/**
- * Get messages for a specific student conversation
- * 
- * OPTIMIZED VERSION:
- * - Uses optimized API route with direct database query
- * - No client-side filtering needed
- * - Supports pagination
- * - Supports AbortController
- */
-export async function getStudentMessages(studentId, programId = null, options = {}) {
-  try {
-    const schoolId = await getUserSchoolId()
-    
-    if (!schoolId || !studentId) {
-      return []
+    const { data: { user }, error } = await supabase.auth.getUser()
+    if (error || !user) {
+      throw new Error('User is not authenticated')
     }
 
-    const apiUrl = getApiUrl()
-    const url = new URL(`${apiUrl}/api/chat/messages`)
-    url.searchParams.set('student_id', studentId)
-    url.searchParams.set('school_id', schoolId)
-    
-    if (programId) {
-      url.searchParams.set('program_id', programId)
-    }
-    
-    if (options.limit) {
-      url.searchParams.set('limit', options.limit.toString())
-    }
-    
-    if (options.offset) {
-      url.searchParams.set('offset', options.offset.toString())
+    let schoolName =
+      user.user_metadata?.school ||
+      null
+
+    if (!schoolName) {
+      const { data: schoolRecord } = await supabase
+        .from('schools')
+        .select('name')
+        .eq('id', schoolId)
+        .maybeSingle()
+
+      schoolName = schoolRecord?.name || 'School'
     }
 
-    const messages = await fetchWithAbort(url.toString(), {
-      method: 'GET',
-      signal: options.signal,
-      cache: options.cache || 'default',
-    })
-
-    return messages || []
-  } catch (error) {
-    console.error('Error getting student messages:', error)
-    throw error
-  }
-}
-
-/**
- * Send reply to a student message
- * 
- * OPTIMIZED VERSION:
- * - Uses optimized API route
- * - Single update query
- * - Supports AbortController
- */
-export async function sendReply(messageId, replyText, options = {}) {
-  try {
-    const user = await getCurrentUser()
-    const schoolId = await getUserSchoolId()
-    
-    if (!user || !schoolId) {
-      throw new Error('User must be authenticated and associated with a school')
+    const payload = {
+      senderId: userId || user.id,
+      senderType: 'school',
+      receiverId: sanitizeId(studentId, 'studentId'),
+      receiverType: 'student',
+      message,
+      schoolId,
+      studentId,
+      studentName,
+      studentEmail,
+      schoolName,
+      programId: programId || null,
+      programTitle: programTitle || null,
     }
 
-    const apiUrl = getApiUrl()
-    const response = await fetchWithAbort(`${apiUrl}/api/chat/reply`, {
+    return await fetchJson(CHAT_MESSAGES_ENDPOINT, {
       method: 'POST',
-      signal: options.signal,
-      cache: 'default',
-      body: JSON.stringify({
-        messageId,
-        replyText: replyText.trim(),
-        schoolId,
-        userName: user.name,
-        userEmail: user.email,
-      }),
+      body: JSON.stringify(payload),
     })
-
-    return response
   } catch (error) {
-    console.error('Error sending reply:', error)
+    console.error('Error sending chat message:', error)
+    throw error
+  }
+}
+
+export async function markMessagesAsRead({ schoolId, studentId }) {
+  try {
+    const resolvedSchoolId = sanitizeId(schoolId || (await getCachedSchoolId()), 'schoolId')
+    const resolvedStudentId = sanitizeId(studentId, 'studentId')
+    const roomId = `${resolvedSchoolId}-${resolvedStudentId}`
+
+    const { error } = await supabase
+      .from('student_messages')
+      .update({
+        is_read: true,
+        read_at: new Date().toISOString(),
+      })
+      .eq('room_id', roomId)
+      .eq('receiver_type', 'school')
+      .eq('is_read', false)
+
+    if (error) {
+      throw error
+    }
+
+    return true
+  } catch (error) {
+    console.error('Error marking messages as read:', error)
     throw error
   }
 }

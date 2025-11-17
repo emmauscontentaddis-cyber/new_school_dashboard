@@ -2,145 +2,140 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables')
+if (!supabaseUrl || !serviceKey) {
+  throw new Error('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set')
 }
 
-const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '')
+const supabase = createClient(supabaseUrl, serviceKey)
 
-/**
- * GET /api/chat/messages?student_id=xxx&program_id=xxx&school_id=xxx
- * 
- * Optimized endpoint to fetch messages for a specific conversation.
- * 
- * Performance optimizations:
- * - Direct database query with indexed filters
- * - Only fetches required fields
- * - Server-side sorting
- * - Supports pagination via limit/offset
- * - Supports AbortController
- */
-export async function GET(request) {
-  const startTime = performance.now()
-  
+const sanitizeId = (value, label) => {
+  if (!value || typeof value !== 'string') {
+    throw new Error(`${label} is required`)
+  }
+  return value.trim()
+}
+
+const buildMessagePayload = async (body) => {
+  const {
+    senderId,
+    senderType,
+    receiverId,
+    receiverType,
+    message,
+    schoolId,
+    studentId,
+    studentName,
+    studentEmail,
+    schoolName,
+    programId,
+    programTitle,
+  } = body
+
+  if (!senderId || !receiverId) {
+    throw new Error('senderId and receiverId are required')
+  }
+
+  if (!['student', 'school'].includes(senderType)) {
+    throw new Error('senderType must be "student" or "school"')
+  }
+
+  if (!['student', 'school'].includes(receiverType)) {
+    throw new Error('receiverType must be "student" or "school"')
+  }
+
+  if (!message?.trim()) {
+    throw new Error('message text is required')
+  }
+
+  const school = sanitizeId(schoolId, 'schoolId')
+  const student = sanitizeId(studentId, 'studentId')
+  const roomId = `${school}-${student}`
+
+  return {
+    sender_id: senderId,
+    sender_type: senderType,
+    receiver_id: receiverId,
+    receiver_type: receiverType,
+    message: message.trim(),
+    school_id: school,
+    school_name: schoolName || null,
+    student_id: student,
+    student_name: studentName || null,
+    student_email: studentEmail || null,
+    program_id: programId || null,
+    program_title: programTitle || null,
+    room_id: roomId,
+    sent_at: new Date().toISOString(),
+    is_read: false,
+    message_type: senderType === 'school' ? 'school_reply' : 'general',
+  }
+}
+
+export async function POST(request) {
   try {
-    const { searchParams } = new URL(request.url)
-    const studentId = searchParams.get('student_id')
-    const programId = searchParams.get('program_id')
-    const schoolId = searchParams.get('school_id')
-    const limit = parseInt(searchParams.get('limit') || '100')
-    const offset = parseInt(searchParams.get('offset') || '0')
+    const body = await request.json()
+    const payload = await buildMessagePayload(body)
 
-    if (!studentId || !schoolId) {
-      return NextResponse.json(
-        { error: 'student_id and school_id are required' },
-        { status: 400 }
-      )
-    }
-
-    // Check for abort signal
-    const signal = request.signal
-    if (signal?.aborted) {
-      return NextResponse.json(
-        { error: 'Request aborted' },
-        { status: 499 }
-      )
-    }
-
-    // Build optimized query - get all messages (both student messages and school replies)
-    // Each message is stored as a separate row
-    let baseQuery = supabase
+    const { data, error } = await supabase
       .from('student_messages')
-      .select('id, message, reply, sent_at, reply_timestamp, message_type, status, program_id')
-      .eq('student_id', studentId)
-      .eq('school_id', schoolId)
-
-    // Filter by program_id if provided
-    if (programId) {
-      baseQuery = baseQuery.eq('program_id', programId)
-    } else {
-      baseQuery = baseQuery.is('program_id', null)
-    }
-
-    const query = baseQuery
-      .order('sent_at', { ascending: true })
-      .range(offset, offset + limit - 1)
-
-    const { data, error } = await query
+      .insert(payload)
+      .select()
+      .single()
 
     if (error) {
-      console.error('Error fetching messages:', error)
+      console.error('Error inserting message:', error)
       return NextResponse.json(
-        { error: error.message || 'Failed to fetch messages' },
+        { error: 'Failed to save message', details: error.message },
         { status: 500 }
       )
     }
 
-    // Transform to chat message format
-    // Each row is either a student message or a school reply
-    const messages = (data || []).map(msg => {
-      const isSchoolReply = msg.message_type === 'school_reply'
-      
-      return {
-        id: msg.id,
-        text: msg.message,
-        sender: isSchoolReply ? 'school' : 'student',
-        timestamp: new Date(msg.sent_at).toISOString(),
-        fullTimestamp: new Date(msg.sent_at).getTime(),
-        messageType: msg.message_type || 'student_message',
-        status: msg.status || 'sent'
-      }
-    })
-
-    // Also check for old-format replies (backward compatibility)
-    // These are stored in the 'reply' column of student messages
-    const oldFormatMessages = []
-    for (const msg of data || []) {
-      if (msg.message_type !== 'school_reply' && msg.reply && msg.reply_timestamp) {
-        oldFormatMessages.push({
-          id: `${msg.id}_reply`,
-          text: msg.reply,
-          sender: 'school',
-          timestamp: new Date(msg.reply_timestamp).toISOString(),
-          fullTimestamp: new Date(msg.reply_timestamp).getTime(),
-          messageType: 'reply',
-          status: 'sent'
-        })
-      }
+    // Optional: notify socket server
+    const chatServerUrl = process.env.CHAT_SERVER_INTERNAL_URL
+    if (chatServerUrl) {
+      fetch(`${chatServerUrl}/api/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).catch((err) => {
+        console.warn('Chat server notification failed (non-critical):', err.message)
+      })
     }
-    
-    // Combine and sort all messages
-    const allMessages = [...messages, ...oldFormatMessages]
 
-    // Sort by timestamp (already sorted from DB, but ensure)
-    allMessages.sort((a, b) => a.fullTimestamp - b.fullTimestamp)
-
-    const duration = performance.now() - startTime
-    console.log(`[API] Messages fetched in ${duration.toFixed(2)}ms`)
-
-    return NextResponse.json(allMessages, {
-      status: 200,
-      headers: {
-        'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=60',
-        'X-Response-Time': `${duration.toFixed(2)}ms`,
-      },
-    })
+    return NextResponse.json({ success: true, data })
   } catch (error) {
-    console.error('Error in GET /api/chat/messages:', error)
-    
-    if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+    console.error('POST /api/chat/messages failed:', error)
+    return NextResponse.json({ error: error.message }, { status: 400 })
+  }
+}
+
+export async function GET(request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const studentId = sanitizeId(searchParams.get('studentId'), 'studentId')
+    const schoolId = sanitizeId(searchParams.get('schoolId'), 'schoolId')
+
+    const roomId = `${schoolId}-${studentId}`
+
+    const { data, error } = await supabase
+      .from('student_messages')
+      .select('*')
+      .eq('room_id', roomId)
+      .order('sent_at', { ascending: true })
+
+    if (error) {
+      console.error('Error fetching messages:', error)
       return NextResponse.json(
-        { error: 'Request aborted' },
-        { status: 499 }
+        { error: 'Failed to fetch messages', details: error.message },
+        { status: 500 }
       )
     }
-    
-    return NextResponse.json(
-      { error: error.message || 'Internal server error' },
-      { status: 500 }
-    )
+
+    return NextResponse.json({ success: true, data: data || [] })
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 })
   }
 }
 

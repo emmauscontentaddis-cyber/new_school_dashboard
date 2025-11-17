@@ -248,12 +248,28 @@ export default function ApplicantsPage() {
                       {app.created_at ? new Date(app.created_at).toLocaleDateString() : 'N/A'}
                     </td>
                     <td className="px-6 py-4">
-                      <button
-                        onClick={() => setSelectedApplication(app)}
-                        className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                      >
-                        View
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setSelectedApplication(app)}
+                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                        >
+                          View
+                        </button>
+                        {app.student_id && (
+                          <button
+                            onClick={() => {
+                              window.location.href = `/chat?studentId=${app.student_id}`
+                            }}
+                            className="text-indigo-600 hover:text-indigo-800 text-sm font-medium flex items-center gap-1"
+                            title="Chat with student"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            </svg>
+                            Chat
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
