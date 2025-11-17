@@ -27,7 +27,18 @@ const fetchJson = async (url, options = {}) => {
     throw new Error(payload?.error || 'Chat request failed')
   }
 
-  return payload?.data ?? []
+  // For POST requests, data is a single object, for GET it's an array
+  // Return the data directly, or empty array/object as fallback
+  if (payload?.data !== undefined) {
+    return payload.data
+  }
+  
+  // If no data field but success is true, return the whole payload
+  if (payload?.success && payload?.data === undefined) {
+    return payload
+  }
+  
+  return []
 }
 
 export async function getConversations({ schoolId, studentId, limit = 500 } = {}) {
@@ -87,18 +98,35 @@ export async function sendMessage({
       throw new Error('User is not authenticated')
     }
 
-    let schoolName =
+    // Try multiple sources for school name
+    let schoolName = 
       user.user_metadata?.school ||
+      user.user_metadata?.school_name ||
       null
 
+    // If not in metadata, fetch from database
     if (!schoolName) {
-      const { data: schoolRecord } = await supabase
-        .from('schools')
-        .select('name')
-        .eq('id', schoolId)
-        .maybeSingle()
+      try {
+        const { data: schoolRecord, error: schoolError } = await supabase
+          .from('schools')
+          .select('name')
+          .eq('id', schoolId)
+          .maybeSingle()
 
-      schoolName = schoolRecord?.name || 'School'
+        if (schoolError) {
+          console.warn('Error fetching school name:', schoolError)
+        }
+
+        schoolName = schoolRecord?.name || null
+      } catch (err) {
+        console.warn('Exception fetching school name:', err)
+      }
+    }
+
+    // Fallback to a default if still null
+    if (!schoolName || !schoolName.trim()) {
+      schoolName = 'School'
+      console.warn(`School name not found for schoolId ${schoolId}, using default`)
     }
 
     const payload = {

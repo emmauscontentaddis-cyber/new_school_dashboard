@@ -53,6 +53,27 @@ const buildMessagePayload = async (body) => {
   const student = sanitizeId(studentId, 'studentId')
   const roomId = `${school}-${student}`
 
+  // Ensure school_name is never null - fetch it if not provided
+  let resolvedSchoolName = schoolName?.trim() || null
+  if (!resolvedSchoolName && senderType === 'school') {
+    // Fetch school name from database if not provided
+    try {
+      const { data: schoolRecord } = await supabase
+        .from('schools')
+        .select('name')
+        .eq('id', school)
+        .maybeSingle()
+      
+      resolvedSchoolName = schoolRecord?.name || 'School'
+    } catch (error) {
+      console.warn('Failed to fetch school name, using default:', error)
+      resolvedSchoolName = 'School'
+    }
+  }
+
+  // Ensure student_name is never null
+  const resolvedStudentName = studentName?.trim() || 'Student'
+
   return {
     sender_id: senderId,
     sender_type: senderType,
@@ -60,12 +81,12 @@ const buildMessagePayload = async (body) => {
     receiver_type: receiverType,
     message: message.trim(),
     school_id: school,
-    school_name: schoolName || null,
+    school_name: resolvedSchoolName || 'School', // Never null
     student_id: student,
-    student_name: studentName || null,
-    student_email: studentEmail || null,
+    student_name: resolvedStudentName,
+    student_email: studentEmail?.trim() || null,
     program_id: programId || null,
-    program_title: programTitle || null,
+    program_title: programTitle?.trim() || null,
     room_id: roomId,
     sent_at: new Date().toISOString(),
     is_read: false,
