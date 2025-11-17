@@ -53,6 +53,18 @@ const buildMessagePayload = async (body) => {
   const student = sanitizeId(studentId, 'studentId')
   const roomId = `${school}-${student}`
 
+  // Fetch school name from database if not provided
+  let resolvedSchoolName = schoolName
+  if (!resolvedSchoolName) {
+    const { data: schoolRecord } = await supabase
+      .from('schools')
+      .select('name')
+      .eq('id', school)
+      .maybeSingle()
+    
+    resolvedSchoolName = schoolRecord?.name || 'School'
+  }
+
   return {
     sender_id: senderId,
     sender_type: senderType,
@@ -60,7 +72,7 @@ const buildMessagePayload = async (body) => {
     receiver_type: receiverType,
     message: message.trim(),
     school_id: school,
-    school_name: schoolName || null,
+    school_name: resolvedSchoolName,
     student_id: student,
     student_name: studentName || null,
     student_email: studentEmail || null,

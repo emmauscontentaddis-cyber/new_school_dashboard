@@ -59,7 +59,7 @@ function getRoomId(rawSchoolId, rawStudentId) {
   return `${schoolId}-${studentId}`;
 }
 
-function buildMessagePayload(payload) {
+async function buildMessagePayload(payload) {
   const {
     senderId,
     senderType,
@@ -91,8 +91,21 @@ function buildMessagePayload(payload) {
     throw new Error('message text is required');
   }
 
+  const school = sanitizeId(schoolId, 'schoolId');
   const roomId = getRoomId(schoolId, studentId);
   const timestamp = new Date().toISOString();
+
+  // Fetch school name from database if not provided
+  let resolvedSchoolName = schoolName;
+  if (!resolvedSchoolName) {
+    const { data: schoolRecord } = await supabase
+      .from('schools')
+      .select('name')
+      .eq('id', school)
+      .maybeSingle();
+    
+    resolvedSchoolName = schoolRecord?.name || 'School';
+  }
 
   return {
     row: {
@@ -101,8 +114,8 @@ function buildMessagePayload(payload) {
       receiver_id: receiverId,
       receiver_type: receiverType,
       message: message.trim(),
-      school_id: sanitizeId(schoolId, 'schoolId'),
-      school_name: schoolName || null,
+      school_id: school,
+      school_name: resolvedSchoolName,
       student_id: sanitizeId(studentId, 'studentId'),
       student_name: studentName || null,
       student_email: studentEmail || null,
@@ -120,7 +133,7 @@ function buildMessagePayload(payload) {
 // REST API endpoint: Send message
 app.post('/api/messages', async (req, res) => {
   try {
-    const { row, roomId } = buildMessagePayload(req.body);
+    const { row, roomId } = await buildMessagePayload(req.body);
 
     const { data, error } = await supabase
       .from('student_messages')
@@ -217,7 +230,7 @@ io.on('connection', (socket) => {
 
   socket.on('send-message', async (messageData) => {
     try {
-      const { row, roomId } = buildMessagePayload(messageData);
+      const { row, roomId } = await buildMessagePayload(messageData);
 
       const { data, error } = await supabase
         .from('student_messages')
