@@ -98,7 +98,7 @@ export async function getConversations({ schoolId, studentId, limit = 500 } = {}
   }
 }
 
-export async function getMessages({ schoolId, studentId, limit = null }) {
+export async function getMessages({ schoolId, studentId, programId = null, limit = null }) {
   try {
     const resolvedSchoolId = sanitizeId(schoolId || (await getCachedSchoolId()), 'schoolId')
     const resolvedStudentId = sanitizeId(studentId, 'studentId')
@@ -106,6 +106,11 @@ export async function getMessages({ schoolId, studentId, limit = null }) {
       schoolId: resolvedSchoolId,
       studentId: resolvedStudentId,
     })
+
+    // Add programId parameter if provided (to filter messages by program)
+    if (programId) {
+      params.set('programId', programId)
+    }
 
     // Add limit parameter if provided (for pagination)
     if (limit && limit > 0) {

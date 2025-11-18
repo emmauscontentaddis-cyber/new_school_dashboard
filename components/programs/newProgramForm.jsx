@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Input from '@/components/ui/Input'
 import Textarea from '@/components/ui/Textarea'
 import Select from '@/components/ui/Select'
@@ -8,7 +8,14 @@ import Button from '@/components/ui/Button'
 import Switch from '@/components/ui/Switch'
 import { getCachedSchoolId } from '@/utils/userCache'
 
-export default function NewProgramForm() {
+export default function NewProgramForm({ onClose, onSuccess }) {
+  // Prevent body scroll when modal is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = 'unset'
+    }
+  }, [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -235,6 +242,16 @@ export default function NewProgramForm() {
       setFinancingStudentAid(false)
       setFinancingTransitionalSupport(false)
       
+      // Close modal and refresh list after a brief delay to show success message
+      setTimeout(() => {
+        if (onSuccess) {
+          onSuccess(result)
+        }
+        if (onClose) {
+          onClose()
+        }
+      }, 1500)
+      
     } catch (err) {
       console.error('Error creating course:', err)
       setError(err.message || 'Failed to register course. Please try again.')
@@ -244,31 +261,52 @@ export default function NewProgramForm() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Register New Course</h1>
-        <p className="text-gray-600 text-sm">Fill in all the course information below</p>
-      </div>
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">⚠️</span>
-            <span>{error}</span>
-          </div>
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !loading) {
+          onClose()
+        }
+      }}
+    >
+      <div 
+        className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10 flex-shrink-0">
+          <h2 className="text-xl font-semibold text-gray-900">Register New Course</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-100"
+            disabled={loading}
+            type="button"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
-      )}
 
-      {success && (
-        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl mb-6">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">✅</span>
-            <span>{success}</span>
-          </div>
-        </div>
-      )}
+        <div className="overflow-y-auto flex-1">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl m-6">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">⚠️</span>
+                <span>{error}</span>
+              </div>
+            </div>
+          )}
 
-      <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-10">
+          {success && (
+            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl m-6">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">✅</span>
+                <span>{success}</span>
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="p-6 space-y-10">
         {/* Basic Information */}
         <section className="space-y-5">
           <div className="pb-2">
@@ -638,16 +676,26 @@ export default function NewProgramForm() {
           </div>
         </section>
 
-        {/* Actions */}
-        <div className="flex justify-end gap-3 pt-8 border-t border-gray-100">
-          <Button
-            type="submit"
-            disabled={loading}
-          >
-            {loading ? 'Registering...' : 'Register Course'}
-          </Button>
+            {/* Actions */}
+            <div className="flex justify-end gap-3 pt-8 border-t border-gray-100">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={onClose}
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={loading}
+              >
+                {loading ? 'Registering...' : 'Register Course'}
+              </Button>
+            </div>
+          </form>
         </div>
-      </form>
+      </div>
     </div>
   )
 }

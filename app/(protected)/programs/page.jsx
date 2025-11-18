@@ -5,8 +5,8 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Button from '@/components/ui/Button'
 import { usePrograms } from '@/context/ProgramsContext'
+import NewProgramForm from '@/components/programs/newProgramForm'
 import { useMemo, useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 
 const Spinner = ({ size = 'md', text }) => {
   const sizeClasses = {
@@ -24,10 +24,10 @@ const Spinner = ({ size = 'md', text }) => {
 
 export default function ProgramsPage() {
   const { programs, loading, error, fetchPrograms, deleteProgram } = usePrograms()
-  const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [deletingId, setDeletingId] = useState(null)
+  const [showForm, setShowForm] = useState(false)
 
   useEffect(() => {
     fetchPrograms()
@@ -81,7 +81,7 @@ export default function ProgramsPage() {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Programs</h1>
             <p className="text-gray-600 text-sm">Manage your courses and programs</p>
           </div>
-          <Button onClick={() => router.push('/cREG2')}>
+          <Button onClick={() => setShowForm(true)}>
             Course Register
           </Button>
         </div>
@@ -131,7 +131,7 @@ export default function ProgramsPage() {
         <div className="bg-white rounded-lg shadow-sm p-12 border border-gray-200 text-center">
           <div className="text-gray-500 mb-4">No programs found</div>
           <Button onClick={() => setShowForm(true)}>
-            Create Your First Program
+            Course Register
           </Button>
         </div>
       ) : (
@@ -199,6 +199,16 @@ export default function ProgramsPage() {
         </div>
       )}
 
+      {/* Course Registration Modal */}
+      {showForm && (
+        <NewProgramForm
+          onClose={() => setShowForm(false)}
+          onSuccess={(newCourse) => {
+            setShowForm(false)
+            fetchPrograms()
+          }}
+        />
+      )}
     </div>
   )
 }

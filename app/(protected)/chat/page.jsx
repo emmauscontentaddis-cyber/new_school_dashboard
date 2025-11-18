@@ -12,6 +12,74 @@ import {
 
 const getConversationKey = (studentId, programId) => `${studentId}-${programId || 'general'}`
 
+// Helper function to normalize message content for comparison
+// Handles multi-word messages by normalizing whitespace
+const normalizeContent = (content) => {
+  if (!content) return ''
+  // Convert to string, trim, and normalize whitespace (multiple spaces/tabs/newlines to single space)
+  return String(content)
+    .trim()
+    .replace(/\s+/g, ' ') // Replace all whitespace sequences with single space
+    .toLowerCase() // Make case-insensitive for comparison
+}
+
+// Helper function to check if a message is a duplicate based on sender, receiver, timestamp, and content
+const isDuplicateMessage = (newMsg, existingMessages) => {
+  if (!newMsg || !existingMessages || existingMessages.length === 0) return false
+  
+  const newContent = normalizeContent(newMsg.message || newMsg.text || '')
+  const newSenderId = newMsg.sender_id || newMsg.senderId
+  const newReceiverId = newMsg.receiver_id || newMsg.receiverId
+  const newSentAt = newMsg.sent_at || newMsg.sentAt || newMsg.created_at
+  
+  if (!newContent || !newSenderId || !newReceiverId || !newSentAt) {
+    return false // Can't determine, assume not duplicate
+  }
+  
+  // Round timestamp to the nearest second for comparison
+  const newSentAtDate = new Date(newSentAt)
+  const newSentAtSecond = Math.floor(newSentAtDate.getTime() / 1000)
+  
+  // Check against all existing messages
+  return existingMessages.some(existing => {
+    const existingContent = normalizeContent(existing.message || existing.text || '')
+    const existingSenderId = existing.sender_id || existing.senderId
+    const existingReceiverId = existing.receiver_id || existing.receiverId
+    const existingSentAt = existing.sent_at || existing.sentAt || existing.created_at
+    
+    if (!existingContent || !existingSenderId || !existingReceiverId || !existingSentAt) {
+      return false
+    }
+    
+    // Round timestamp to the nearest second
+    const existingSentAtDate = new Date(existingSentAt)
+    const existingSentAtSecond = Math.floor(existingSentAtDate.getTime() / 1000)
+    
+    // Check if same content (normalized), sender, receiver, and within the same second
+    const isDuplicate = (
+      newContent === existingContent &&
+      newSenderId === existingSenderId &&
+      newReceiverId === existingReceiverId &&
+      newSentAtSecond === existingSentAtSecond
+    )
+    
+    if (isDuplicate) {
+      console.log('🔍 [isDuplicateMessage] Duplicate detected:', {
+        newContent: newContent.substring(0, 50),
+        existingContent: existingContent.substring(0, 50),
+        newSenderId,
+        existingSenderId,
+        newReceiverId,
+        existingReceiverId,
+        newSentAtSecond,
+        existingSentAtSecond
+      })
+    }
+    
+    return isDuplicate
+  })
+}
+
 export default function ChatPage() {
   const { schoolId, user } = useAuth()
   const [contacts, setContacts] = useState([])
@@ -25,6 +93,7 @@ export default function ChatPage() {
   const [socketStatus, setSocketStatus] = useState({ isConnected: false })
   const [error, setError] = useState(null)
   const messagesEndRef = useRef(null)
+  const messagesContainerRef = useRef(null)
   const inputRef = useRef(null)
   // Track recently processed message IDs to prevent rapid duplicates
   const processedMessageIdsRef = useRef(new Set())
@@ -32,38 +101,108 @@ export default function ChatPage() {
   const messagesCacheRef = useRef(new Map())
   // Track if we've auto-selected the first conversation
   const hasAutoSelectedRef = useRef(false)
+  // Prevent double-sends: block sending while a send is in progress
+  const isSendingMessageRef = useRef(false)
+  // Track recently sent messages for duplicate content detection
+  const recentSentMessagesRef = useRef([])
 
-  const scrollToBottom = () => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    const container = messagesContainerRef.current
+    if (container) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior,
+      })
+      return
     }
-  }
+
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior, block: 'end' })
+    }
+  }, [])
 
   // Deduplicate and sort messages before rendering
+  // This is a final safety net to ensure no duplicates make it to the UI
+  // Includes content-based deduplication to handle backend duplicates with different IDs
   const uniqueMessages = useMemo(() => {
+    // First pass: deduplicate by ID (keep latest version)
     const messageMap = new Map()
     messages.forEach(msg => {
-      if (msg && msg.id && !messageMap.has(msg.id)) {
+      if (msg && msg.id) {
+        // Always use the latest version if duplicate IDs exist
         messageMap.set(msg.id, msg)
       }
     })
     
-    const sorted = Array.from(messageMap.values())
-      .sort((a, b) => {
-        const dateA = new Date(a.sent_at || a.sentAt || 0)
-        const dateB = new Date(b.sent_at || b.sentAt || 0)
-        return dateA - dateB
-      })
+    // Second pass: content-based deduplication
+    // Detect duplicates with same content, sender, receiver, programId, and timestamps within the same second
+    // IMPORTANT: Include programId to prevent cross-program duplicates
+    const contentBasedMap = new Map()
+    const messagesArray = Array.from(messageMap.values())
+    
+    messagesArray.forEach(msg => {
+      if (!msg || !msg.id) return
+      
+      // Use normalized content for consistent comparison (handles multi-word messages)
+      const content = normalizeContent(msg.message || msg.text || '')
+      const senderId = msg.sender_id || msg.senderId
+      const receiverId = msg.receiver_id || msg.receiverId
+      const programId = msg.program_id || msg.programId || null // Normalize null
+      const sentAt = msg.sent_at || msg.sentAt || msg.created_at
+      
+      if (!content || !senderId || !receiverId || !sentAt) {
+        // If we can't determine uniqueness, keep the message
+        contentBasedMap.set(msg.id, msg)
+        return
+      }
+      
+      // Round timestamp to the nearest second for comparison
+      const sentAtDate = new Date(sentAt)
+      const sentAtSecond = Math.floor(sentAtDate.getTime() / 1000)
+      
+      // Create a content-based key INCLUDING programId to prevent cross-program duplicates
+      // Use normalized content for consistent comparison
+      const contentKey = `${content}|${senderId}|${receiverId}|${programId}|${sentAtSecond}`
+      
+      if (!contentBasedMap.has(contentKey)) {
+        // First occurrence of this content combination
+        contentBasedMap.set(contentKey, msg)
+      } else {
+        // Duplicate found - keep the one with earlier timestamp
+        const existing = contentBasedMap.get(contentKey)
+        const existingTime = new Date(existing.sent_at || existing.sentAt || existing.created_at).getTime()
+        const currentTime = sentAtDate.getTime()
+        
+        if (currentTime < existingTime) {
+          // Current message is earlier, replace
+          contentBasedMap.set(contentKey, msg)
+        }
+        // Otherwise keep the existing (earlier) message
+      }
+    })
+    
+    // Convert back to array and sort
+    const deduplicatedMessages = Array.from(contentBasedMap.values())
+    const sorted = deduplicatedMessages.sort((a, b) => {
+      const dateA = new Date(a.sent_at || a.sentAt || 0)
+      const dateB = new Date(b.sent_at || b.sentAt || 0)
+      return dateA - dateB
+    })
     
     console.log('🔄 [uniqueMessages] Computed', {
       count: sorted.length,
+      inputCount: messages.length,
+      idDedupCount: messagesArray.length,
+      contentDedupCount: sorted.length,
       timestamp: new Date().toISOString(),
       messageIds: sorted.map(m => m.id)
     })
     return sorted
   }, [messages])
 
-  useEffect(scrollToBottom, [uniqueMessages])
+  useEffect(() => {
+    scrollToBottom('smooth')
+  }, [uniqueMessages, scrollToBottom])
 
   // Debug: Log when messages change
   useEffect(() => {
@@ -202,32 +341,64 @@ export default function ChatPage() {
       if (message.school_id !== schoolId) return
       
       // Check if we've already processed this message ID recently
+      // This prevents duplicates from socket re-emissions, especially on refresh
       if (processedMessageIdsRef.current.has(message.id)) {
-        console.log('Ignoring duplicate message:', message.id)
+        console.log('Ignoring duplicate message (already processed):', message.id)
+        return
+      }
+      
+      // If we're currently loading messages, mark this as processed but don't add it yet
+      // It will be included in the API response
+      if (loadingMessages) {
+        processedMessageIdsRef.current.add(message.id)
+        setTimeout(() => {
+          processedMessageIdsRef.current.delete(message.id)
+        }, 5 * 60 * 1000)
+        console.log('Message received during loading, marked as processed:', message.id)
         return
       }
 
       // For school messages, only process if we're in the correct conversation
       // This allows socket echoes to update the UI if the API response was incomplete
       if (message.sender_type === 'school') {
-        const currentProgramKey = selectedConversation?.programId || 'general'
-        const messageProgramKey = message.program_id || 'general'
+        // Normalize programIds for strict comparison
+        const currentProgramId = selectedConversation?.programId && selectedConversation.programId !== 'general' && selectedConversation.programId !== 'null'
+          ? selectedConversation.programId 
+          : null
+        let messageProgramId = message.program_id || message.programId
+        if (!messageProgramId || messageProgramId === 'general' || messageProgramId === 'null') {
+          messageProgramId = null
+        }
+        
         const isCurrentConversation = 
           selectedConversation &&
           selectedConversation.studentId === message.student_id &&
-          currentProgramKey === messageProgramKey
+          currentProgramId === messageProgramId
         
         if (!isCurrentConversation) {
           // Not in the current conversation, ignore
           return
         }
         
-        // Check if message already exists in state
+        // Check if message already exists in state (by ID or by content/sender/receiver/timestamp)
         setMessages((prev) => {
-          const exists = prev.some(m => m.id === message.id)
-          if (exists) {
-            // Already exists, ignore
+          const existsById = prev.some(m => m.id === message.id)
+          if (existsById) {
+            // Already exists by ID, ignore
             return prev
+          }
+          
+          // Check for duplicate by content, sender, receiver, timestamp
+          const isDuplicate = isDuplicateMessage(message, prev)
+          if (isDuplicate) {
+            console.warn('⚠️ [handleIncomingMessage] Duplicate message detected (by content/sender/receiver/timestamp), blocking:', {
+              id: message.id,
+              content: message.message?.substring(0, 50),
+              senderId: message.sender_id,
+              receiverId: message.receiver_id,
+              sentAt: message.sent_at
+            })
+            return prev // Don't add duplicate
           }
           
           // Add the message (socket echo might have more complete data)
@@ -270,8 +441,14 @@ export default function ChatPage() {
       
       upsertContactFromMessage(message)
 
-      const currentProgramKey = selectedConversation?.programId || 'general'
-      const messageProgramKey = message.program_id || 'general'
+      // Normalize programIds for strict comparison
+      const currentProgramId = selectedConversation?.programId && selectedConversation.programId !== 'general' && selectedConversation.programId !== 'null'
+        ? selectedConversation.programId 
+        : null
+      let messageProgramId = message.program_id || message.programId
+      if (!messageProgramId || messageProgramId === 'general' || messageProgramId === 'null') {
+        messageProgramId = null
+      }
       const conversationKey = getConversationKey(message.student_id, message.program_id)
       
       // Update cache for this conversation even if not currently selected
@@ -290,30 +467,45 @@ export default function ChatPage() {
       if (
         selectedConversation &&
         selectedConversation.studentId === message.student_id &&
-        currentProgramKey === messageProgramKey
+        currentProgramId === messageProgramId
       ) {
         setMessages((prev) => {
-          // Use Map for efficient deduplication
+          // Check for duplicate by ID first
           const messageMap = new Map(prev.map(m => [m.id, m]))
+          const existsById = messageMap.has(message.id)
           
-          // Only add if it doesn't exist
-          if (!messageMap.has(message.id)) {
-            messageMap.set(message.id, message)
-            const sorted = Array.from(messageMap.values()).sort((a, b) => {
-              const dateA = new Date(a.sent_at || 0)
-              const dateB = new Date(b.sent_at || 0)
-              return dateA - dateB
-            })
-            
-            // Update cache for current conversation
-            if (selectedConversation?.conversationId) {
-              messagesCacheRef.current.set(selectedConversation.conversationId, sorted)
-            }
-            
-            return sorted
+          if (existsById) {
+            // Already exists by ID, ignore
+            return prev
           }
           
-          return prev
+          // Check for duplicate by content, sender, receiver, timestamp
+          const isDuplicate = isDuplicateMessage(message, prev)
+          if (isDuplicate) {
+            console.warn('⚠️ [handleIncomingMessage] Duplicate student message detected (by content/sender/receiver/timestamp), blocking:', {
+              id: message.id,
+              content: message.message?.substring(0, 50),
+              senderId: message.sender_id,
+              receiverId: message.receiver_id,
+              sentAt: message.sent_at
+            })
+            return prev // Don't add duplicate
+          }
+          
+          // Add the message
+          messageMap.set(message.id, message)
+          const sorted = Array.from(messageMap.values()).sort((a, b) => {
+            const dateA = new Date(a.sent_at || 0)
+            const dateB = new Date(b.sent_at || 0)
+            return dateA - dateB
+          })
+          
+          // Update cache for current conversation
+          if (selectedConversation?.conversationId) {
+            messagesCacheRef.current.set(selectedConversation.conversationId, sorted)
+          }
+          
+          return sorted
         })
         if (message.sender_type === 'student') {
           markMessagesAsRead({ schoolId, studentId: message.student_id }).catch(() => {})
@@ -342,7 +534,7 @@ export default function ChatPage() {
         }
       }
     },
-    [schoolId, selectedConversation, upsertContactFromMessage, isSending]
+    [schoolId, selectedConversation, upsertContactFromMessage, isSending, loadingMessages]
   )
 
   useEffect(() => {
@@ -371,6 +563,9 @@ export default function ChatPage() {
       
       const conversationKey = conversation.conversationId
       
+      // Clear messages state when switching conversations to prevent cross-contamination
+      setMessages([])
+      
       // Immediately show cached messages if available for instant loading
       const cachedMessages = messagesCacheRef.current.get(conversationKey)
       if (cachedMessages && cachedMessages.length > 0) {
@@ -378,6 +573,14 @@ export default function ChatPage() {
         setMessages(cachedMessages)
         setLoadingMessages(false)
         setError(null)
+        requestAnimationFrame(() => scrollToBottom('auto'))
+        
+        // Mark cached messages as processed to prevent socket duplicates
+        cachedMessages.forEach(msg => {
+          if (msg && msg.id) {
+            processedMessageIdsRef.current.add(msg.id)
+          }
+        })
         
         // Mark messages as read in background
         markMessagesAsRead({
@@ -409,29 +612,117 @@ export default function ChatPage() {
       
       try {
         // Load only the most recent 100 messages initially for faster loading
+        // Pass programId to filter messages by program
+        // Normalize 'general' or empty string to null for API consistency
+        const normalizedProgramId = conversation.programId && conversation.programId !== 'general' 
+          ? conversation.programId 
+          : null
         const data = await getMessages({
           schoolId,
           studentId: conversation.studentId,
+          programId: normalizedProgramId,
           limit: 100, // Load only recent messages first
         })
         
-        // Deduplicate messages by ID and sort by sent_at
-        const messageMap = new Map()
-        ;(data || []).forEach(msg => {
-          if (msg.id && !messageMap.has(msg.id)) {
-            messageMap.set(msg.id, msg)
-            // Mark as processed to prevent duplicates from socket
-            processedMessageIdsRef.current.add(msg.id)
+        // Filter messages by programId on client side as well (defensive filtering)
+        // This ensures we only show messages for the current program context
+        // Normalize 'general' to null for comparison - STRICT matching
+        const currentProgramId = conversation.programId && conversation.programId !== 'general' && conversation.programId !== 'null'
+          ? conversation.programId 
+          : null
+        const filteredData = (data || []).filter(msg => {
+          // Normalize message programId - handle null, undefined, 'general', 'null' string
+          let msgProgramId = msg.program_id || msg.programId
+          if (!msgProgramId || msgProgramId === 'general' || msgProgramId === 'null') {
+            msgProgramId = null
           }
+          
+          // STRICT matching: both must be null OR both must be the same non-null value
+          if (currentProgramId === null) {
+            return msgProgramId === null
+          }
+          return msgProgramId === currentProgramId
         })
+        
+        // Deduplicate messages by ID first, then by content/sender/receiver/timestamp
+        // Use Map to ensure no duplicates even if API returns them
+        const messageMap = new Map()
+        const seenContentKeys = new Set()
+        
+        filteredData.forEach(msg => {
+          if (!msg || !msg.id) return
+          
+          // Check for duplicate by ID
+          if (messageMap.has(msg.id)) {
+            // Already exists by ID, skip
+            return
+          }
+          
+          // Check for duplicate by content, sender, receiver, timestamp
+          // Use normalized content for consistent comparison
+          const content = normalizeContent(msg.message || msg.text || '')
+          const senderId = msg.sender_id || msg.senderId
+          const receiverId = msg.receiver_id || msg.receiverId
+          const sentAt = msg.sent_at || msg.sentAt || msg.created_at
+          
+          if (content && senderId && receiverId && sentAt) {
+            const sentAtDate = new Date(sentAt)
+            const sentAtSecond = Math.floor(sentAtDate.getTime() / 1000)
+            const contentKey = `${content}|${senderId}|${receiverId}|${sentAtSecond}`
+            
+            if (seenContentKeys.has(contentKey)) {
+              // Duplicate by content/sender/receiver/timestamp, skip
+              console.warn('⚠️ [selectConversation] Duplicate message in API response (by content/sender/receiver/timestamp), skipping:', {
+                id: msg.id,
+                content: content.substring(0, 50),
+                contentKey
+              })
+              return
+            }
+            
+            seenContentKeys.add(contentKey)
+          }
+          
+          // Add the message
+          messageMap.set(msg.id, msg)
+        })
+        
         const uniqueMessages = Array.from(messageMap.values())
           .sort((a, b) => new Date(a.sent_at || 0) - new Date(b.sent_at || 0))
         
-        // Update cache
+        // Mark ALL loaded messages as processed IMMEDIATELY to prevent socket duplicates
+        // This must happen before setMessages to prevent race conditions
+        uniqueMessages.forEach(msg => {
+          if (msg.id) {
+            processedMessageIdsRef.current.add(msg.id)
+          }
+        })
+        
+        // Update cache with the deduplicated messages
         messagesCacheRef.current.set(conversationKey, uniqueMessages)
         
-        setMessages(uniqueMessages)
+        // Set messages - the deduplication in setMessages will also catch any duplicates
+        setMessages(prev => {
+          // Merge with existing messages and deduplicate
+          const mergedMap = new Map()
+          // Add existing messages first
+          prev.forEach(msg => {
+            if (msg && msg.id) {
+              mergedMap.set(msg.id, msg)
+            }
+          })
+          // Add new messages (will overwrite if duplicate)
+          uniqueMessages.forEach(msg => {
+            if (msg && msg.id) {
+              mergedMap.set(msg.id, msg)
+            }
+          })
+          // Return sorted array
+          return Array.from(mergedMap.values())
+            .sort((a, b) => new Date(a.sent_at || 0) - new Date(b.sent_at || 0))
+        })
         setError(null)
+        requestAnimationFrame(() => scrollToBottom('auto'))
         
         // Mark messages as read in background (non-blocking)
         markMessagesAsRead({
@@ -462,7 +753,7 @@ export default function ChatPage() {
         setLoadingMessages(false)
       }
     },
-    [schoolId]
+    [schoolId, scrollToBottom]
   )
 
   // Auto-select the most recent conversation when contacts are loaded
@@ -497,9 +788,15 @@ export default function ChatPage() {
     console.log('🚀 [handleSendMessage] START', new Date().toISOString())
     event.preventDefault()
     
-    // Prevent double submission
+    // Prevent double submission using ref (more reliable than state)
+    if (isSendingMessageRef.current) {
+      console.warn('⚠️ [handleSendMessage] Already sending (ref check), ignoring duplicate request')
+      return
+    }
+    
+    // Prevent double submission using state (backup check)
     if (isSending) {
-      console.warn('⚠️ [handleSendMessage] Already sending, ignoring duplicate request')
+      console.warn('⚠️ [handleSendMessage] Already sending (state check), ignoring duplicate request')
       return
     }
     
@@ -523,10 +820,43 @@ export default function ChatPage() {
 
     const messageToSend = messageText.trim()
     
+    // Check for recent duplicate content (within last 2 seconds)
+    const now = Date.now()
+    const twoSecondsAgo = now - 2000
+    const recentDuplicate = recentSentMessagesRef.current.find(recent => {
+      const isRecent = recent.timestamp > twoSecondsAgo
+      const sameContent = recent.content === messageToSend
+      const sameSender = recent.senderId === (user?.id || null)
+      const sameReceiver = recent.receiverId === selectedConversation.studentId
+      return isRecent && sameContent && sameSender && sameReceiver
+    })
+    
+    if (recentDuplicate) {
+      console.warn('⚠️ [handleSendMessage] Duplicate content detected (sent within last 2 seconds), ignoring')
+      setError('This message was just sent. Please wait a moment.')
+      return
+    }
+    
+    // Set sending flag in ref immediately (after all validation checks pass)
+    isSendingMessageRef.current = true
+    
     // Set sending state and clear input immediately for better UX
     setIsSending(true)
     setMessageText('')
     setError(null)
+    
+    // Record this message in recent sent messages for duplicate detection
+    recentSentMessagesRef.current.push({
+      content: messageToSend,
+      senderId: user?.id || null,
+      receiverId: selectedConversation.studentId,
+      timestamp: now
+    })
+    
+    // Clean up old entries (older than 5 seconds)
+    recentSentMessagesRef.current = recentSentMessagesRef.current.filter(
+      recent => recent.timestamp > (now - 5000)
+    )
     console.log('📤 [handleSendMessage] Preparing to send:', { 
       messageLength: messageToSend.length,
       messagePreview: messageToSend.substring(0, 50),
@@ -632,17 +962,33 @@ export default function ChatPage() {
           timestamp: new Date().toISOString()
         })
         
-        // Use Map for efficient deduplication
+        // Check for duplicate by ID first
         const messageMap = new Map(prev.map(m => [m.id, m]))
+        const existsById = messageMap.has(normalizedMessage.id)
+        
+        // Check for duplicate by content, sender, receiver, timestamp
+        const isDuplicate = isDuplicateMessage(normalizedMessage, prev)
         
         console.log('🔍 [setMessages] Checking for duplicates:', {
           existingIds: Array.from(messageMap.keys()),
           newId: normalizedMessage.id,
-          alreadyExists: messageMap.has(normalizedMessage.id),
+          existsById,
+          isDuplicate,
           hasValidId: !!normalizedMessage?.id
         })
         
-        // Always add the message if it has an ID (even if it exists, update it)
+        // Block if duplicate by content/sender/receiver/timestamp
+        if (isDuplicate && !existsById) {
+          console.warn('⚠️ [setMessages] Duplicate message detected (by content/sender/receiver/timestamp), blocking:', {
+            content: normalizedMessage.message?.substring(0, 50),
+            senderId: normalizedMessage.sender_id,
+            receiverId: normalizedMessage.receiver_id,
+            sentAt: normalizedMessage.sent_at
+          })
+          return prev // Don't add duplicate
+        }
+        
+        // Add the message if it has an ID
         if (normalizedMessage?.id) {
           console.log('➕ [setMessages] Adding/updating message in state')
           messageMap.set(normalizedMessage.id, normalizedMessage)
@@ -782,8 +1128,9 @@ export default function ChatPage() {
         }
       }, 100)
     } finally {
-      // Always reset sending state
+      // Always reset sending state and ref
       setIsSending(false)
+      isSendingMessageRef.current = false
     }
   }
 
@@ -1149,6 +1496,7 @@ export default function ChatPage() {
                 </button>
               </div>
               <div
+                ref={messagesContainerRef}
                 style={{
                   flex: 1,
                   overflowY: 'auto',

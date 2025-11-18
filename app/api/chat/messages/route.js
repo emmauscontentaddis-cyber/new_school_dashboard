@@ -186,7 +186,13 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url)
     const studentId = sanitizeId(searchParams.get('studentId'), 'studentId')
     const schoolId = sanitizeId(searchParams.get('schoolId'), 'schoolId')
+    let programId = searchParams.get('programId') // Optional programId filter
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit'), 10) : null
+
+    // Normalize programId: handle null, undefined, empty string, 'null' string, 'general' string
+    if (!programId || programId === 'null' || programId === 'general' || programId === '') {
+      programId = null
+    }
 
     const roomId = `${schoolId}-${studentId}`
 
@@ -195,6 +201,16 @@ export async function GET(request) {
       .select('*')
       .eq('room_id', roomId)
       .order('sent_at', { ascending: false }) // Get most recent first
+
+    // Filter by programId - STRICT filtering
+    // If programId is null, show only messages where program_id is null (general inquiries)
+    // If programId is provided, show only messages for that specific program
+    if (programId !== null) {
+      query = query.eq('program_id', programId)
+    } else {
+      // When programId is null, show only messages where program_id is null
+      query = query.is('program_id', null)
+    }
 
     // Apply limit if provided (for pagination)
     if (limit && limit > 0) {
