@@ -98,7 +98,7 @@ export async function getConversations({ schoolId, studentId, limit = 500 } = {}
   }
 }
 
-export async function getMessages({ schoolId, studentId }) {
+export async function getMessages({ schoolId, studentId, limit = null }) {
   try {
     const resolvedSchoolId = sanitizeId(schoolId || (await getCachedSchoolId()), 'schoolId')
     const resolvedStudentId = sanitizeId(studentId, 'studentId')
@@ -106,6 +106,11 @@ export async function getMessages({ schoolId, studentId }) {
       schoolId: resolvedSchoolId,
       studentId: resolvedStudentId,
     })
+
+    // Add limit parameter if provided (for pagination)
+    if (limit && limit > 0) {
+      params.set('limit', String(limit))
+    }
 
     return await fetchJson(`${CHAT_MESSAGES_ENDPOINT}?${params.toString()}`)
   } catch (error) {

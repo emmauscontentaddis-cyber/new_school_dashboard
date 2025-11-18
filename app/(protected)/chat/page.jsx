@@ -28,6 +28,10 @@ export default function ChatPage() {
   const inputRef = useRef(null)
   // Track recently processed message IDs to prevent rapid duplicates
   const processedMessageIdsRef = useRef(new Set())
+  // Cache messages per conversation for instant loading
+  const messagesCacheRef = useRef(new Map())
+  // Track if we've auto-selected the first conversation
+  const hasAutoSelectedRef = useRef(false)
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -234,6 +238,12 @@ export default function ChatPage() {
             const dateB = new Date(b.sent_at || 0)
             return dateA - dateB
           })
+          
+          // Update cache for current conversation
+          if (selectedConversation?.conversationId) {
+            messagesCacheRef.current.set(selectedConversation.conversationId, sorted)
+          }
+          
           return sorted
         })
         
@@ -262,6 +272,21 @@ export default function ChatPage() {
 
       const currentProgramKey = selectedConversation?.programId || 'general'
       const messageProgramKey = message.program_id || 'general'
+      const conversationKey = getConversationKey(message.student_id, message.program_id)
+      
+      // Update cache for this conversation even if not currently selected
+      const cachedMessages = messagesCacheRef.current.get(conversationKey) || []
+      const cachedMap = new Map(cachedMessages.map(m => [m.id, m]))
+      if (!cachedMap.has(message.id)) {
+        cachedMap.set(message.id, message)
+        const sortedCached = Array.from(cachedMap.values()).sort((a, b) => {
+          const dateA = new Date(a.sent_at || 0)
+          const dateB = new Date(b.sent_at || 0)
+          return dateA - dateB
+        })
+        messagesCacheRef.current.set(conversationKey, sortedCached)
+      }
+      
       if (
         selectedConversation &&
         selectedConversation.studentId === message.student_id &&
@@ -279,6 +304,12 @@ export default function ChatPage() {
               const dateB = new Date(b.sent_at || 0)
               return dateA - dateB
             })
+            
+            // Update cache for current conversation
+            if (selectedConversation?.conversationId) {
+              messagesCacheRef.current.set(selectedConversation.conversationId, sorted)
+            }
+            
             return sorted
           }
           
@@ -336,14 +367,54 @@ export default function ChatPage() {
 
   const selectConversation = useCallback(
     async (conversation) => {
-      setSelectedConversation(conversation)
       if (!conversation || !conversation.studentId || !schoolId) return
-      setLoadingMessages(true)
+      
+      const conversationKey = conversation.conversationId
+      
+      // Immediately show cached messages if available for instant loading
+      const cachedMessages = messagesCacheRef.current.get(conversationKey)
+      if (cachedMessages && cachedMessages.length > 0) {
+        setSelectedConversation(conversation)
+        setMessages(cachedMessages)
+        setLoadingMessages(false)
+        setError(null)
+        
+        // Mark messages as read in background
+        markMessagesAsRead({
+          schoolId,
+          studentId: conversation.studentId,
+        }).catch(() => {})
+        
+        setContacts((prev) =>
+          prev.map((item) =>
+            item.conversationId === conversation.conversationId ? { ...item, unreadCount: 0 } : item
+          )
+        )
+        
+        if (schoolId && conversation) {
+          socketService.joinConversationRoom(schoolId, conversation.studentId)
+        }
+        
+        // Focus input immediately
+        setTimeout(() => {
+          if (inputRef.current) {
+            inputRef.current.focus()
+          }
+        }, 50)
+      } else {
+        // No cache, show loading state
+        setSelectedConversation(conversation)
+        setLoadingMessages(true)
+      }
+      
       try {
+        // Load only the most recent 100 messages initially for faster loading
         const data = await getMessages({
           schoolId,
           studentId: conversation.studentId,
+          limit: 100, // Load only recent messages first
         })
+        
         // Deduplicate messages by ID and sort by sent_at
         const messageMap = new Map()
         ;(data || []).forEach(msg => {
@@ -355,17 +426,25 @@ export default function ChatPage() {
         })
         const uniqueMessages = Array.from(messageMap.values())
           .sort((a, b) => new Date(a.sent_at || 0) - new Date(b.sent_at || 0))
+        
+        // Update cache
+        messagesCacheRef.current.set(conversationKey, uniqueMessages)
+        
         setMessages(uniqueMessages)
         setError(null)
-        await markMessagesAsRead({
+        
+        // Mark messages as read in background (non-blocking)
+        markMessagesAsRead({
           schoolId,
           studentId: conversation.studentId,
-        })
+        }).catch(() => {})
+        
         setContacts((prev) =>
           prev.map((item) =>
             item.conversationId === conversation.conversationId ? { ...item, unreadCount: 0 } : item
           )
         )
+        
         if (schoolId && conversation) {
           socketService.joinConversationRoom(schoolId, conversation.studentId)
         }
@@ -375,7 +454,7 @@ export default function ChatPage() {
           if (inputRef.current) {
             inputRef.current.focus()
           }
-        }, 200)
+        }, 100)
       } catch (error) {
         console.error('Failed to load messages:', error)
         setError(error.message || 'Unable to load messages')
@@ -385,6 +464,33 @@ export default function ChatPage() {
     },
     [schoolId]
   )
+
+  // Auto-select the most recent conversation when contacts are loaded
+  useEffect(() => {
+    // Only auto-select if:
+    // 1. Contacts are loaded (not loading)
+    // 2. We have contacts
+    // 3. No conversation is currently selected
+    // 4. We haven't auto-selected yet (to prevent re-selecting when contacts update)
+    if (
+      !loadingContacts &&
+      contacts.length > 0 &&
+      !selectedConversation &&
+      !hasAutoSelectedRef.current
+    ) {
+      // Find the most recent conversation by timestamp
+      const mostRecent = contacts.reduce((latest, current) => {
+        const latestTime = new Date(latest.timestamp || 0).getTime()
+        const currentTime = new Date(current.timestamp || 0).getTime()
+        return currentTime > latestTime ? current : latest
+      })
+
+      if (mostRecent) {
+        hasAutoSelectedRef.current = true
+        selectConversation(mostRecent)
+      }
+    }
+  }, [contacts, loadingContacts, selectedConversation, selectConversation])
 
   const handleSendMessage = async (event) => {
     const startTime = Date.now()
@@ -545,6 +651,12 @@ export default function ChatPage() {
             const dateB = new Date(b.sent_at || b.sentAt || 0)
             return dateA - dateB
           })
+          
+          // Update cache for current conversation
+          if (selectedConversation?.conversationId) {
+            messagesCacheRef.current.set(selectedConversation.conversationId, sorted)
+          }
+          
           console.log('✅ [setMessages] State update complete', {
             newCount: sorted.length,
             allIds: sorted.map(m => m.id),

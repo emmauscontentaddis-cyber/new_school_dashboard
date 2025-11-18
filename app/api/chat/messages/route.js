@@ -186,14 +186,22 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url)
     const studentId = sanitizeId(searchParams.get('studentId'), 'studentId')
     const schoolId = sanitizeId(searchParams.get('schoolId'), 'schoolId')
+    const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit'), 10) : null
 
     const roomId = `${schoolId}-${studentId}`
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('student_messages')
       .select('*')
       .eq('room_id', roomId)
-      .order('sent_at', { ascending: true })
+      .order('sent_at', { ascending: false }) // Get most recent first
+
+    // Apply limit if provided (for pagination)
+    if (limit && limit > 0) {
+      query = query.limit(limit)
+    }
+
+    const { data, error } = await query
 
     if (error) {
       console.error('Error fetching messages:', error)
@@ -203,7 +211,10 @@ export async function GET(request) {
       )
     }
 
-    return NextResponse.json({ success: true, data: data || [] })
+    // Reverse to get chronological order (oldest first) for display
+    const sortedData = (data || []).reverse()
+
+    return NextResponse.json({ success: true, data: sortedData })
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 400 })
   }
