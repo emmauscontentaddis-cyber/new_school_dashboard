@@ -5,8 +5,8 @@ import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Button from '@/components/ui/Button'
 import { usePrograms } from '@/context/ProgramsContext'
-import ProgramForm from '@/components/programs/ProgramForm'
 import { useMemo, useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
 const Spinner = ({ size = 'md', text }) => {
   const sizeClasses = {
@@ -24,11 +24,10 @@ const Spinner = ({ size = 'md', text }) => {
 
 export default function ProgramsPage() {
   const { programs, loading, error, fetchPrograms, deleteProgram } = usePrograms()
-
+  const router = useRouter()
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [deletingId, setDeletingId] = useState(null)
-  const [showForm, setShowForm] = useState(false)
 
   useEffect(() => {
     fetchPrograms()
@@ -82,8 +81,8 @@ export default function ProgramsPage() {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Programs</h1>
             <p className="text-gray-600 text-sm">Manage your courses and programs</p>
           </div>
-          <Button onClick={() => setShowForm(true)}>
-            + New Program
+          <Button onClick={() => router.push('/cREG2')}>
+            Course Register
           </Button>
         </div>
       </div>
@@ -200,16 +199,6 @@ export default function ProgramsPage() {
         </div>
       )}
 
-      {/* Program Form Modal */}
-      {showForm && (
-        <ProgramForm
-          onClose={() => setShowForm(false)}
-          onSuccess={(newProgram) => {
-            setShowForm(false)
-            fetchPrograms()
-          }}
-        />
-      )}
     </div>
   )
 }
