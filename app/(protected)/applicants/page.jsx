@@ -6,6 +6,11 @@ import { useApplications } from '@/context/ApplicationsContext'
 import { usePrograms } from '@/context/ProgramsContext'
 import { useMemo, useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
+
+const ApplicationDetail = dynamic(() => import('./components/ApplicationDetail/ApplicationDetail'), {
+  ssr: false,
+})
 
 const Spinner = ({ size = 'md', text }) => {
   const sizeClasses = {
@@ -44,14 +49,14 @@ const statusColors = {
 }
 
 export default function ApplicantsPage() {
-  const { applications, stats, loading, error, fetchApplications, fetchStats } = useApplications()
+  const { applications, stats, loading, error, fetchApplications, fetchStats, clearSelected } = useApplications()
   const { programs, fetchPrograms } = usePrograms()
 
   const searchParams = useSearchParams()
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState(searchParams?.get('status') || 'all')
   const [courseId, setCourseId] = useState(searchParams?.get('courseId') || 'all')
-  const [selectedApplication, setSelectedApplication] = useState(null)
+  const [detailApplicationId, setDetailApplicationId] = useState(null)
 
   useEffect(() => {
     if (!searchParams) return
@@ -98,46 +103,6 @@ export default function ApplicantsPage() {
 
     return filtered
   }, [applications, status, courseId, query])
-
-  if (selectedApplication) {
-    return (
-      <div>
-        <button
-          onClick={() => setSelectedApplication(null)}
-          className="mb-4 text-sm text-gray-600 hover:text-gray-900"
-        >
-          ← Back to list
-        </button>
-        <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-          <h2 className="text-2xl font-bold mb-4">{selectedApplication.student_name}</h2>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700">Email</label>
-              <div className="text-gray-900">{selectedApplication.student_email}</div>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-700">Program</label>
-              <div className="text-gray-900">{selectedApplication.courses?.title || 'N/A'}</div>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-700">Status</label>
-              <div>
-                <span className={`px-2 py-1 rounded text-sm ${statusColors[selectedApplication.status] || statusColors.pending}`}>
-                  {statusLabels[selectedApplication.status] || selectedApplication.status}
-                </span>
-              </div>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-700">Applied</label>
-              <div className="text-gray-900">
-                {selectedApplication.created_at ? new Date(selectedApplication.created_at).toLocaleDateString() : 'N/A'}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div>
@@ -256,7 +221,7 @@ export default function ApplicantsPage() {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => setSelectedApplication(app)}
+                          onClick={() => setDetailApplicationId(app.id)}
                           className="text-blue-600 hover:text-blue-800 text-sm font-medium"
                         >
                           View
@@ -283,6 +248,15 @@ export default function ApplicantsPage() {
             </table>
           </div>
         </div>
+      )}
+      {detailApplicationId && (
+        <ApplicationDetail
+          applicationId={detailApplicationId}
+          onClose={() => {
+            setDetailApplicationId(null)
+            clearSelected()
+          }}
+        />
       )}
     </div>
   )
