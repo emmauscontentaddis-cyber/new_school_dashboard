@@ -1207,7 +1207,7 @@ export default function ChatPage() {
         bottom: 0,
         height: '100vh',
         width: 'calc(100vw - 256px)',
-        backgroundColor: '#f8fafc',
+        backgroundColor: '#ffffff',
         padding: '0px',
         overflow: 'auto',
         boxSizing: 'border-box',
@@ -1280,7 +1280,7 @@ export default function ChatPage() {
           <div style={{ 
             padding: '20px 24px', 
             borderBottom: '1px solid #e2e8f0',
-            backgroundColor: '#f8fafc',
+            backgroundColor: '#ffffff',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
@@ -1418,42 +1418,42 @@ export default function ChatPage() {
                   
                   {/* Content */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                      <p style={{ 
-                        margin: 0, 
-                        fontWeight: 600,
-                        fontSize: 15,
-                        color: '#0f172a',
-                      }}>
-                        {contact.studentName || 'Unnamed student'}
-                      </p>
-                      {contact.unreadCount > 0 && (
-                        <span
-                          style={{
-                            backgroundColor: '#1e40af',
-                            color: '#ffffff',
-                            borderRadius: 10,
-                            padding: '2px 8px',
-                            fontSize: 11,
-                            fontWeight: 600,
-                            minWidth: 20,
-                            textAlign: 'center',
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                    <p style={{ 
+                      margin: 0, 
+                      fontWeight: 600,
+                      fontSize: 15,
+                      color: '#0f172a',
+                    }}>
+                      {contact.studentName || 'Unnamed student'}
+                    </p>
+                    {contact.unreadCount > 0 && (
+                      <span
+                        style={{
+                          backgroundColor: '#1e40af',
+                          color: '#ffffff',
+                          borderRadius: 10,
+                          padding: '2px 8px',
+                          fontSize: 11,
+                          fontWeight: 600,
+                          minWidth: 20,
+                          textAlign: 'center',
                             flexShrink: 0,
                             marginLeft: '8px',
-                          }}
-                        >
-                          {contact.unreadCount}
-                        </span>
-                      )}
-                    </div>
-                    <p style={{ 
-                      margin: '0 0 8px', 
-                      fontSize: 13, 
-                      color: '#64748b',
-                      fontWeight: 500,
-                    }}>
-                      {contact.programTitle || 'General Inquiry'}
-                    </p>
+                        }}
+                      >
+                        {contact.unreadCount}
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ 
+                    margin: '0 0 8px', 
+                    fontSize: 13, 
+                    color: '#64748b',
+                    fontWeight: 500,
+                  }}>
+                    {contact.programTitle || 'General Inquiry'}
+                  </p>
                     {lastMessageText !== 'No messages yet' ? (
                       <div style={{ 
                         fontSize: 12, 
@@ -1463,10 +1463,10 @@ export default function ChatPage() {
                         borderRadius: '6px',
                         display: 'inline-block',
                         maxWidth: '100%',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}>
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>
                         {lastMessageText}
                       </div>
                     ) : (
@@ -1497,7 +1497,7 @@ export default function ChatPage() {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  backgroundColor: '#f8fafc',
+                  backgroundColor: '#ffffff',
                 }}
               >
                 <div>
@@ -1556,7 +1556,7 @@ export default function ChatPage() {
                   padding: '28px 32px',
                   display: 'flex',
                   flexDirection: 'column',
-                  backgroundColor: '#f8fafc',
+                  backgroundColor: '#ffffff',
                 }}
               >
                 {loadingMessages && (
@@ -1691,7 +1691,7 @@ export default function ChatPage() {
                 gap: 16,
                 padding: 48,
                 textAlign: 'center',
-                backgroundColor: '#f8fafc',
+                backgroundColor: '#ffffff',
               }}
             >
               <h2 style={{ 

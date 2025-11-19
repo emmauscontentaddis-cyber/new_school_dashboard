@@ -87,8 +87,8 @@ export default function DashboardPage() {
         }
       } else {
         setVisibleWidgets(null)
+        }
       }
-    }
   }, [view])
 
   // Initialize dashboard
@@ -217,53 +217,53 @@ export default function DashboardPage() {
       </div>
 
       {view === 'operational' && (
-        <div className="grid gap-6 pb-8">
+      <div className="grid gap-6 pb-8">
           {/* Stat Cards */}
           {isWidgetVisible('stat-cards') && (
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-            <StatCard 
-              label="New Applications" 
-              value={stats.pending || 0} 
-              icon="📝" 
-              tone="indigo"
-              onClick={() => handleStatCardClick('pending')}
-            />
-            <StatCard 
-              label="In Review" 
-              value={stats.under_review || 0} 
-              icon="🔎" 
-              tone="amber"
-              onClick={() => handleStatCardClick('under_review')}
-            />
-            <StatCard 
-              label="Accepted" 
-              value={stats.accepted || 0} 
-              icon="✅" 
-              tone="emerald"
-              onClick={() => handleStatCardClick('accepted')}
-            />
-            <StatCard 
-              label="Rejected" 
-              value={stats.rejected || 0} 
-              icon="❌" 
-              tone="red"
-              onClick={() => handleStatCardClick('rejected')}
-            />
-            <StatCard 
-              label="Enrolled" 
-              value={stats.enrolled || 0} 
-              icon="🎓" 
-              tone="slate"
-              onClick={() => handleStatCardClick('enrolled')}
-            />
-            <StatCard 
-              label="Total Programs" 
-              value={programs.length} 
-              icon="📚" 
-              tone="blue"
-              onClick={() => router.push('/programs')}
-            />
-          </div>
+          <StatCard 
+            label="New Applications" 
+            value={stats.pending || 0} 
+            icon="📝" 
+            tone="indigo"
+            onClick={() => handleStatCardClick('pending')}
+          />
+          <StatCard 
+            label="In Review" 
+            value={stats.under_review || 0} 
+            icon="🔎" 
+            tone="amber"
+            onClick={() => handleStatCardClick('under_review')}
+          />
+          <StatCard 
+            label="Accepted" 
+            value={stats.accepted || 0} 
+            icon="✅" 
+            tone="emerald"
+            onClick={() => handleStatCardClick('accepted')}
+          />
+          <StatCard 
+            label="Rejected" 
+            value={stats.rejected || 0} 
+            icon="❌" 
+            tone="red"
+            onClick={() => handleStatCardClick('rejected')}
+          />
+          <StatCard 
+            label="Enrolled" 
+            value={stats.enrolled || 0} 
+            icon="🎓" 
+            tone="slate"
+            onClick={() => handleStatCardClick('enrolled')}
+          />
+          <StatCard 
+            label="Total Programs" 
+            value={programs.length} 
+            icon="📚" 
+            tone="blue"
+            onClick={() => router.push('/programs')}
+          />
+        </div>
           )}
 
           {/* Charts Row */}
@@ -276,7 +276,7 @@ export default function DashboardPage() {
               {loading ? (
                 <div className="flex items-center justify-center h-[400px]">
                   <Loader size="md" text="Loading pipeline data..." />
-                </div>
+              </div>
               ) : (
                 <PipelineChart 
                   data={pipelineData} 
@@ -297,7 +297,7 @@ export default function DashboardPage() {
               ) : (
                 <ProgramStatusChart programs={programs} />
               )}
-            </div>
+              </div>
             )}
           </div>
           )}
@@ -312,7 +312,7 @@ export default function DashboardPage() {
               {loading ? (
                 <div className="flex items-center justify-center h-[300px]">
                   <Loader size="md" text="Loading marketing data..." />
-                </div>
+              </div>
               ) : (
                 <MarketingSourceWidget 
                   applications={applications}
@@ -327,8 +327,8 @@ export default function DashboardPage() {
               <h3 className="text-lg font-semibold text-gray-900 mb-1">Notifications & Tasks</h3>
               <p className="text-sm text-gray-600 mb-4">Recent activity and pending tasks</p>
               <NotificationCenter />
-            </div>
-            )}
+               </div>
+             )}
           </div>
           )}
         </div>
@@ -392,7 +392,7 @@ export default function DashboardPage() {
               {loading ? (
                 <div className="flex items-center justify-center h-[400px]">
                   <Loader size="md" text="Loading pipeline data..." />
-                </div>
+          </div>
               ) : (
                 <PipelineChart 
                   data={pipelineData} 
@@ -400,8 +400,8 @@ export default function DashboardPage() {
                 />
               )}
             </div>
-            )}
-          </div>
+          )}
+        </div>
           )}
 
           {/* Conversion Rate and Marketing Sources */}
@@ -430,8 +430,8 @@ export default function DashboardPage() {
               {loading ? (
                 <div className="flex items-center justify-center h-[300px]">
                   <Loader size="md" text="Loading marketing data..." />
-                </div>
-              ) : (
+            </div>
+          ) : (
                 <MarketingSourceWidget 
                   applications={applications}
                   onSourceClick={(source) => handleChartClick('marketing', source)}
@@ -512,9 +512,9 @@ export default function DashboardPage() {
                         <span className="text-sm font-medium text-gray-700">Programs at Risk</span>
                         <span className={`text-lg font-bold ${
                           strategicData.atRisk > 0 ? 'text-amber-600' : 'text-emerald-600'
-                        }`}>
+                    }`}>
                           {strategicData.atRisk || 0}
-                        </span>
+                    </span>
                       </div>
                       <div className="text-xs text-gray-500">
                         Programs with less than 50% expected enrollment
@@ -558,8 +558,8 @@ export default function DashboardPage() {
               {loading ? (
                 <div className="flex items-center justify-center h-[400px]">
                   <Loader size="md" text="Loading pipeline data..." />
-                </div>
-              ) : (
+            </div>
+          ) : (
                 <PipelineChart data={pipelineData} />
               )}
             </div>

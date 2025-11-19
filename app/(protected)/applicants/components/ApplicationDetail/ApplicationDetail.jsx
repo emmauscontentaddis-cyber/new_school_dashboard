@@ -476,15 +476,15 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
   return (
 
-    <div 
+    <div
 
-      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 sm:p-6" 
+      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 sm:p-6"
 
       onClick={onClose}
 
     >
 
-      <div 
+      <div
 
         className="w-full max-w-6xl rounded-2xl bg-white shadow-2xl flex flex-col"
 
@@ -532,13 +532,13 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
             {['overview', 'workflow', 'screening', 'review', 'interview', 'offer', 'enrollment', 'timeline'].map((tab) => (
 
-              <button
+                <button
 
-                key={tab}
+                  key={tab}
 
-                onClick={() => setActiveTab(tab)}
+                  onClick={() => setActiveTab(tab)}
 
-                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${
 
                   activeTab === tab
 
@@ -546,13 +546,13 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
                     : 'text-slate-600 hover:text-slate-900'
 
-                }`}
+                  }`}
 
               >
 
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
 
-              </button>
+                </button>
 
             ))}
 
@@ -584,7 +584,7 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
                       {statusLabels[app.status] || app.status}
 
-                    </div>
+                  </div>
 
                   </div>
 
@@ -684,7 +684,7 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
                         {app.cover_letter}
 
-                      </div>
+                    </div>
 
                     </div>
 
@@ -700,7 +700,7 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
                         {app.motivation_statement}
 
-                      </div>
+                    </div>
 
                     </div>
 
@@ -850,7 +850,7 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
                 </div>
 
-              </GlassCard>
+                </GlassCard>
 
             </>
 
@@ -996,7 +996,7 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
                               {new Date(app.interview_date).toLocaleString()}
 
-                            </div>
+                          </div>
 
                           </div>
 
@@ -1100,17 +1100,17 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
                       {!app.interview_completed && (
 
-                        <button
+                              <button
 
                           onClick={() => setActiveTab('interview')}
 
-                          className="rounded-md bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700"
+                                className="rounded-md bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700"
 
-                        >
+                              >
 
                           Complete Interview
 
-                        </button>
+                              </button>
 
                       )}
 
@@ -1184,61 +1184,61 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
                     <>
 
-                      <GlassCard title="Offer Letter">
+                    <GlassCard title="Offer Letter">
 
-                        <div className="space-y-3">
+                      <div className="space-y-3">
 
-                          <div>
+                        <div>
 
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Sent Date</label>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Sent Date</label>
 
                             <div className="text-slate-900">
 
                               {app.offer_sent_at ? new Date(app.offer_sent_at).toLocaleString() : 'N/A'}
 
-                            </div>
+                        </div>
 
                           </div>
 
-                          {app.offer_letter && (
+                        {app.offer_letter && (
 
-                            <div>
+                          <div>
 
-                              <label className="block text-sm font-medium text-slate-700 mb-1">Offer Content</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Offer Content</label>
 
                               <div className="bg-slate-50 rounded-lg p-4 text-slate-900 whitespace-pre-wrap">
 
                                 {app.offer_letter}
 
-                              </div>
+                          </div>
 
                             </div>
 
-                          )}
+                        )}
 
-                          {app.offer_conditions && app.offer_conditions.length > 0 && (
+                        {app.offer_conditions && app.offer_conditions.length > 0 && (
 
-                            <div>
+                          <div>
 
-                              <label className="block text-sm font-medium text-slate-700 mb-1">Conditions</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Conditions</label>
 
-                              <ul className="list-disc list-inside space-y-1 text-slate-900">
+                            <ul className="list-disc list-inside space-y-1 text-slate-900">
 
-                                {app.offer_conditions.map((condition, index) => (
+                              {app.offer_conditions.map((condition, index) => (
 
-                                  <li key={index}>{condition}</li>
+                                <li key={index}>{condition}</li>
 
-                                ))}
+                              ))}
 
-                              </ul>
+                            </ul>
 
-                            </div>
+                          </div>
 
-                          )}
+                        )}
 
-                        </div>
+                      </div>
 
-                      </GlassCard>
+                    </GlassCard>
 
                     </>
 
@@ -1308,7 +1308,7 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
                             {app.enrolled_at ? new Date(app.enrolled_at).toLocaleString() : 'N/A'}
 
-                          </div>
+                        </div>
 
                         </div>
 
@@ -1334,7 +1334,7 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
                               {new Date(app.enrollment_start_date).toLocaleDateString()}
 
-                            </div>
+                          </div>
 
                           </div>
 
@@ -1406,9 +1406,9 @@ export default function ApplicationDetail({ applicationId, onClose }) {
 
           )}
 
-        </div>
-
       </div>
+
+    </div>
 
     </div>
 
