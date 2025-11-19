@@ -29,6 +29,7 @@ const statusLabels = {
   rejected: 'Rejected',
   waitlisted: 'Waitlisted',
   enrolled: 'Enrolled',
+  withdrawn: 'Withdrawn',
 }
 
 const statusColors = {
@@ -39,6 +40,7 @@ const statusColors = {
   rejected: 'bg-red-100 text-red-800',
   waitlisted: 'bg-purple-100 text-purple-800',
   enrolled: 'bg-green-100 text-green-800',
+  withdrawn: 'bg-yellow-100 text-yellow-800',
 }
 
 export default function ApplicantsPage() {
@@ -180,7 +182,7 @@ export default function ApplicantsPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-5 mb-6">
+      <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 mb-6">
         <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200 text-center">
           <div className="text-2xl font-bold text-gray-900">{stats.total || 0}</div>
           <div className="text-sm text-gray-600">Total</div>
@@ -200,6 +202,10 @@ export default function ApplicantsPage() {
         <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200 text-center">
           <div className="text-2xl font-bold text-red-600">{stats.rejected || 0}</div>
           <div className="text-sm text-gray-600">Rejected</div>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm p-4 border border-gray-200 text-center">
+          <div className="text-2xl font-bold text-yellow-600">{stats.withdrawn || 0}</div>
+          <div className="text-sm text-gray-600">Withdrawn</div>
         </div>
       </div>
 

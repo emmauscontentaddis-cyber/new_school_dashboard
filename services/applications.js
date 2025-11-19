@@ -245,6 +245,8 @@ export async function getApplicationStats() {
         accepted: 0,
         rejected: 0,
         waitlisted: 0,
+        enrolled: 0,
+        withdrawn: 0,
       }
     }
 
@@ -268,6 +270,8 @@ export async function getApplicationStats() {
         accepted: 0,
         rejected: 0,
         waitlisted: 0,
+        enrolled: 0,
+        withdrawn: 0,
       }
     }
 
@@ -297,6 +301,8 @@ export async function getApplicationStats() {
       accepted: data?.filter(a => a.status === 'accepted').length || 0,
       rejected: data?.filter(a => a.status === 'rejected').length || 0,
       waitlisted: data?.filter(a => a.status === 'waitlisted').length || 0,
+      enrolled: data?.filter(a => a.status === 'enrolled').length || 0,
+      withdrawn: data?.filter(a => a.status === 'withdrawn').length || 0,
     }
 
     return stats

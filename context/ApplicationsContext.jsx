@@ -13,6 +13,8 @@ const initialState = {
     accepted: 0,
     rejected: 0,
     waitlisted: 0,
+    enrolled: 0,
+    withdrawn: 0,
   },
   loading: false,
   error: null,

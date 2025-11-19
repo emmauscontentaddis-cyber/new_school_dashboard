@@ -4,9 +4,10 @@ import StatCard from '@/components/ui/StatCard'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Button from '@/components/ui/Button'
+import Table from '@/components/ui/Table'
 import { usePrograms } from '@/context/ProgramsContext'
 import NewProgramForm from '@/components/programs/newProgramForm'
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
 
 const Spinner = ({ size = 'md', text }) => {
   const sizeClasses = {
@@ -28,6 +29,29 @@ export default function ProgramsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [deletingId, setDeletingId] = useState(null)
   const [showForm, setShowForm] = useState(false)
+
+  const formatFee = (program) => {
+    const amount = Number(program.fee ?? program.tuition ?? 0)
+    const currency = program.currency || 'SEK'
+
+    try {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency,
+        maximumFractionDigits: 0,
+      }).format(amount)
+    } catch {
+      return `${amount.toLocaleString()} ${currency}`
+    }
+  }
+
+  const formatDeadline = (program) => {
+    const dateValue = program.application_deadline || program.deadline || program.end_date
+    if (!dateValue) return '—'
+    const date = new Date(dateValue)
+    if (Number.isNaN(date.getTime())) return '—'
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  }
 
   useEffect(() => {
     fetchPrograms()
@@ -59,7 +83,7 @@ export default function ProgramsPage() {
     })
   }, [programs, searchQuery, statusFilter])
 
-  const handleDelete = async (id) => {
+  const handleDelete = useCallback(async (id) => {
     if (!confirm('Are you sure you want to delete this program?')) return
     
     setDeletingId(id)
@@ -71,7 +95,87 @@ export default function ProgramsPage() {
     } finally {
       setDeletingId(null)
     }
-  }
+  }, [deleteProgram])
+
+  const tableColumns = useMemo(() => ([
+    { header: 'Program', accessor: 'program' },
+    { header: 'Modality', accessor: 'modality' },
+    { header: 'Fee', accessor: 'fee' },
+    { header: 'Capacity', accessor: 'capacity' },
+    { header: 'Deadline', accessor: 'deadline' },
+    { header: 'Status', accessor: 'status' },
+    { header: 'Actions', accessor: 'actions' },
+  ]), [])
+
+  const tableData = useMemo(() => (
+    filteredPrograms.map((program) => {
+      const isOpen = program.open || program.status === 'active'
+      const modalityLabel = program.modality || (program.online ? 'Online' : program.hybrid ? 'Hybrid' : 'On-campus')
+      const capacity = program.seats ?? program.credits ?? 0
+
+      return {
+        program: (
+          <div className="min-w-[180px]">
+            <div className="font-semibold text-slate-900">{program.name || program.title}</div>
+            {program.course_code && (
+              <div className="text-xs text-slate-500 mt-0.5">{program.course_code}</div>
+            )}
+          </div>
+        ),
+        modality: (
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+            {modalityLabel}
+          </span>
+        ),
+        fee: (
+          <span className="font-medium text-slate-900">
+            {formatFee(program)}
+          </span>
+        ),
+        capacity: (
+          <span className="text-slate-700">{capacity.toLocaleString()} seats</span>
+        ),
+        deadline: (
+          <span className="text-slate-700">{formatDeadline(program)}</span>
+        ),
+        status: (
+          <span
+            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+              isOpen ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700'
+            }`}
+          >
+            {isOpen ? 'Open' : 'Closed'}
+          </span>
+        ),
+        actions: (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => alert('View program details will be implemented')}
+            >
+              View
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => alert('Edit form will be implemented')}
+            >
+              Edit
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => handleDelete(program.id)}
+              disabled={deletingId === program.id}
+            >
+              {deletingId === program.id ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
+        ),
+      }
+    })
+  ), [filteredPrograms, deletingId, handleDelete])
 
   return (
     <div>
@@ -118,7 +222,7 @@ export default function ProgramsPage() {
         </div>
       </div>
 
-      {/* Programs List */}
+      {/* Programs Table */}
       {loading ? (
         <div className="flex items-center justify-center h-64">
           <Spinner size="lg" text="Loading programs..." />
@@ -135,67 +239,8 @@ export default function ProgramsPage() {
           </Button>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {filteredPrograms.map((program) => (
-            <div key={program.id} className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                    {program.name || program.title}
-                  </h3>
-                  {program.course_code && (
-                    <div className="text-sm text-gray-500">{program.course_code}</div>
-                  )}
-                </div>
-                <span className={`px-2 py-1 rounded text-xs ${
-                  program.open || program.status === 'active' 
-                    ? 'bg-emerald-100 text-emerald-800' 
-                    : 'bg-gray-100 text-gray-800'
-                }`}>
-                  {program.open || program.status === 'active' ? 'Open' : 'Closed'}
-                </span>
-              </div>
-              
-              <div className="space-y-2 mb-4">
-                {program.short_description && (
-                  <div className="text-sm text-gray-600 line-clamp-2">
-                    {program.short_description}
-                  </div>
-                )}
-                <div className="flex items-center gap-4 text-sm text-gray-500">
-                  <span>Seats: {program.seats || program.credits || 0}</span>
-                  {program.modality && <span>{program.modality}</span>}
-                </div>
-                {program.category && (
-                  <div className="text-sm">
-                    <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded">
-                      {program.category}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 pt-4 border-t border-gray-200">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => alert('Edit form will be implemented')}
-                  className="flex-1"
-                >
-                  Edit
-                </Button>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={() => handleDelete(program.id)}
-                  disabled={deletingId === program.id}
-                  className="flex-1"
-                >
-                  {deletingId === program.id ? 'Deleting...' : 'Delete'}
-                </Button>
-              </div>
-            </div>
-          ))}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-0">
+          <Table columns={tableColumns} data={tableData} />
         </div>
       )}
 
