@@ -8,7 +8,7 @@ import Button from '@/components/ui/Button'
 import Switch from '@/components/ui/Switch'
 import { getCachedSchoolId } from '@/utils/userCache'
 
-export default function NewProgramForm({ onClose, onSuccess }) {
+export default function NewProgramForm({ programId, onClose, onSuccess }) {
   // Prevent body scroll when modal is open
   useEffect(() => {
     document.body.style.overflow = 'hidden'
@@ -274,7 +274,9 @@ export default function NewProgramForm({ onClose, onSuccess }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10 flex-shrink-0">
-          <h2 className="text-xl font-semibold text-gray-900">Register New Course</h2>
+          <h2 className="text-xl font-semibold text-gray-900">
+            {programId ? 'Edit Program' : 'Register New Course'}
+          </h2>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-100"
@@ -689,8 +691,11 @@ export default function NewProgramForm({ onClose, onSuccess }) {
               <Button
                 type="submit"
                 disabled={loading}
+                className={programId ? 'bg-slate-900 hover:bg-slate-800' : ''}
               >
-                {loading ? 'Registering...' : 'Register Course'}
+                {loading 
+                  ? (programId ? 'Updating...' : 'Registering...') 
+                  : (programId ? 'Update Program' : 'Register Course')}
               </Button>
             </div>
           </form>

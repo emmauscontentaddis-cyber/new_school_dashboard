@@ -8,6 +8,11 @@ import Table from '@/components/ui/Table'
 import { usePrograms } from '@/context/ProgramsContext'
 import NewProgramForm from '@/components/programs/newProgramForm'
 import { useMemo, useState, useEffect, useCallback } from 'react'
+import dynamic from 'next/dynamic'
+
+const ProgramDetail = dynamic(() => import('./components/ProgramDetail/ProgramDetail'), {
+  ssr: false,
+})
 
 const Spinner = ({ size = 'md', text }) => {
   const sizeClasses = {
@@ -29,6 +34,8 @@ export default function ProgramsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [deletingId, setDeletingId] = useState(null)
   const [showForm, setShowForm] = useState(false)
+  const [detailProgramId, setDetailProgramId] = useState(null)
+  const [editingProgramId, setEditingProgramId] = useState(null)
 
   const formatFee = (program) => {
     const amount = Number(program.fee ?? program.tuition ?? 0)
@@ -152,14 +159,14 @@ export default function ProgramsPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => alert('View program details will be implemented')}
+              onClick={() => setDetailProgramId(program.id)}
             >
               View
             </Button>
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => alert('Edit form will be implemented')}
+              onClick={() => setEditingProgramId(program.id)}
             >
               Edit
             </Button>
@@ -175,7 +182,7 @@ export default function ProgramsPage() {
         ),
       }
     })
-  ), [filteredPrograms, deletingId, handleDelete])
+  ), [filteredPrograms, deletingId, handleDelete, formatFee, formatDeadline])
 
   return (
     <div>
@@ -185,8 +192,14 @@ export default function ProgramsPage() {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Programs</h1>
             <p className="text-gray-600 text-sm">Manage your courses and programs</p>
           </div>
-          <Button onClick={() => setShowForm(true)}>
-            Course Register
+          <Button 
+            onClick={() => {
+              setShowForm(true)
+              setEditingProgramId(null)
+            }}
+            className={editingProgramId ? 'bg-slate-900 hover:bg-slate-800' : ''}
+          >
+            {editingProgramId ? 'Edit Program' : 'Course Register'}
           </Button>
         </div>
       </div>
@@ -244,12 +257,32 @@ export default function ProgramsPage() {
         </div>
       )}
 
-      {/* Course Registration Modal */}
-      {showForm && (
+      {/* Course Registration/Edit Modal */}
+      {(showForm || editingProgramId) && (
         <NewProgramForm
-          onClose={() => setShowForm(false)}
-          onSuccess={(newCourse) => {
+          programId={editingProgramId || null}
+          onClose={() => {
             setShowForm(false)
+            setEditingProgramId(null)
+          }}
+          onSuccess={(course) => {
+            setShowForm(false)
+            setEditingProgramId(null)
+            fetchPrograms()
+          }}
+        />
+      )}
+
+      {/* Program Detail Modal */}
+      {detailProgramId && (
+        <ProgramDetail
+          programId={detailProgramId}
+          onClose={() => setDetailProgramId(null)}
+          onEdit={() => {
+            setEditingProgramId(detailProgramId)
+            setDetailProgramId(null)
+          }}
+          onRefresh={() => {
             fetchPrograms()
           }}
         />

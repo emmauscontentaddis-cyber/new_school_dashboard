@@ -28,11 +28,11 @@ export default function WorkflowProgress({ application, onNavigateToTab }) {
   return (
     <GlassCard title="Workflow Progress">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center gap-4">
-          {statusOrder.map((status, index) => {
-            const isComplete = currentIndex >= index
-            return (
-              <div key={status} className="flex items-center gap-2">
+        {statusOrder.map((status, index) => {
+          const isComplete = currentIndex >= index
+          return (
+            <div key={status} className="flex items-start gap-3">
+              <div className="flex flex-col items-center">
                 <button
                   type="button"
                   onClick={() => onNavigateToTab?.(mapStatusToTab(status))}
@@ -44,19 +44,19 @@ export default function WorkflowProgress({ application, onNavigateToTab }) {
                 >
                   {index + 1}
                 </button>
-                <div className="text-left">
-                  <div className="text-sm font-medium text-slate-900">{statusLabels[status]}</div>
-                  <div className="text-xs text-slate-500">
-                    {application.status === status ? 'In progress' : isComplete ? 'Complete' : 'Pending'}
-                  </div>
-                </div>
                 {index < statusOrder.length - 1 && (
-                  <div className={`hidden sm:block w-10 h-0.5 ${currentIndex >= index + 1 ? 'bg-blue-500' : 'bg-slate-200'}`} />
+                  <div className={`w-0.5 h-8 mt-2 ${currentIndex >= index + 1 ? 'bg-blue-500' : 'bg-slate-200'}`} />
                 )}
               </div>
-            )
-          })}
-        </div>
+              <div className="flex-1 pb-4">
+                <div className="text-sm font-medium text-slate-900">{statusLabels[status]}</div>
+                <div className="text-xs text-slate-500">
+                  {application.status === status ? 'In progress' : isComplete ? 'Complete' : 'Pending'}
+                </div>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </GlassCard>
   )

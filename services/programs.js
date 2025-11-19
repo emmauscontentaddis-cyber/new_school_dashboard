@@ -36,7 +36,6 @@ export async function getProgramCapacity(programId) {
     const { data: enrolledApps, error: enrolledError } = await supabase
       .from('applications')
       .select('id')
-      .eq('school_id', schoolId)
       .eq('course_id', programId)
       .eq('status', 'enrolled')
 
@@ -47,7 +46,6 @@ export async function getProgramCapacity(programId) {
     const { data: acceptedApps, error: acceptedError } = await supabase
       .from('applications')
       .select('id')
-      .eq('school_id', schoolId)
       .eq('course_id', programId)
       .eq('status', 'accepted')
 
@@ -95,7 +93,6 @@ export async function getProgramStatistics(programId) {
     const { data: applications, error } = await supabase
       .from('applications')
       .select('id, status, marketing_source, additional_info, created_at')
-      .eq('school_id', schoolId)
       .eq('course_id', programId)
 
     if (error) throw error
@@ -175,7 +172,6 @@ export async function getProgramsWithCapacity() {
     const { data: enrolledApps, error: enrolledError } = await supabase
       .from('applications')
       .select('course_id')
-      .eq('school_id', schoolId)
       .eq('status', 'enrolled')
 
     if (enrolledError) throw enrolledError
@@ -190,7 +186,6 @@ export async function getProgramsWithCapacity() {
     const { data: acceptedApps, error: acceptedError } = await supabase
       .from('applications')
       .select('course_id')
-      .eq('school_id', schoolId)
       .eq('status', 'accepted')
 
     if (acceptedError) throw acceptedError
