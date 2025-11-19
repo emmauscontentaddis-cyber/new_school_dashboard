@@ -1154,7 +1154,7 @@ export default function ChatPage() {
       borderRadius: 4,
       marginBottom: 12,
       alignSelf: isMine ? 'flex-end' : 'flex-start',
-      backgroundColor: isMine ? '#2563eb' : '#ffffff',
+      backgroundColor: isMine ? '#1f2937' : '#ffffff',
       color: isMine ? '#ffffff' : '#1f2937',
       border: isMine ? 'none' : '1px solid #e5e7eb',
       boxShadow: isMine ? '0 1px 2px rgba(0,0,0,0.1)' : '0 1px 2px rgba(0,0,0,0.05)',
@@ -1200,19 +1200,26 @@ export default function ChatPage() {
   return (
     <div
       style={{
+        position: 'fixed',
+        top: 0,
+        left: '256px',
+        right: 0,
+        bottom: 0,
         height: '100vh',
+        width: 'calc(100vw - 256px)',
         backgroundColor: '#f8fafc',
-        padding: '20px',
+        padding: '0px',
         overflow: 'auto',
         boxSizing: 'border-box',
+        margin: 0,
       }}
     >
       {error && (
         <div
           data-error-message
           style={{
-            maxWidth: 1400,
-            margin: '0 auto 20px',
+            width: '100%',
+            margin: '10px 0',
             backgroundColor: '#fef2f2',
             border: '2px solid #dc2626',
             color: '#b91c1c',
@@ -1249,14 +1256,14 @@ export default function ChatPage() {
       )}
       <div
         style={{
-          maxWidth: 1400,
-          margin: '0 auto',
+          width: '100%',
+          margin: error ? '10px 0 0 0' : '0',
           backgroundColor: '#ffffff',
           borderRadius: 0,
           overflow: 'hidden',
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
           display: 'flex',
-          height: 'calc(100vh - 100px)',
+          height: error ? 'calc(100vh - 70px)' : '100vh',
           border: '1px solid #e2e8f0',
         }}
       >
@@ -1350,6 +1357,18 @@ export default function ChatPage() {
             )}
             {conversationsToDisplay.map((contact) => {
               const isActive = selectedConversation?.conversationId === contact.conversationId
+              const lastMessageText = typeof contact.lastMessage === 'string' 
+                ? contact.lastMessage 
+                : (typeof contact.lastMessage === 'object' 
+                  ? (contact.lastMessage?.text || contact.lastMessage?.message || 'No messages yet')
+                  : 'No messages yet')
+              const initials = (contact.studentName || 'U')
+                .split(' ')
+                .map(n => n[0])
+                .join('')
+                .toUpperCase()
+                .substring(0, 2)
+              
               return (
                 <button
                   key={contact.conversationId || `conv-${contact.studentId}-${Date.now()}`}
@@ -1363,6 +1382,9 @@ export default function ChatPage() {
                     backgroundColor: isActive ? '#eff6ff' : 'transparent',
                     cursor: 'pointer',
                     transition: 'background-color 0.15s',
+                    display: 'flex',
+                    gap: '12px',
+                    alignItems: 'flex-start',
                   }}
                   onMouseEnter={(e) => {
                     if (!isActive) {
@@ -1375,53 +1397,83 @@ export default function ChatPage() {
                     }
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                    <p style={{ 
-                      margin: 0, 
+                  {/* Profile Photo */}
+                  <div
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '50%',
+                      backgroundColor: '#1f2937',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#ffffff',
+                      fontSize: '16px',
                       fontWeight: 600,
-                      fontSize: 15,
-                      color: '#0f172a',
-                    }}>
-                      {contact.studentName || 'Unnamed student'}
-                    </p>
-                    {contact.unreadCount > 0 && (
-                      <span
-                        style={{
-                          backgroundColor: '#1e40af',
-                          color: '#ffffff',
-                          borderRadius: 10,
-                          padding: '2px 8px',
-                          fontSize: 11,
-                          fontWeight: 600,
-                          minWidth: 20,
-                          textAlign: 'center',
-                        }}
-                      >
-                        {contact.unreadCount}
-                      </span>
-                    )}
+                      flexShrink: 0,
+                    }}
+                  >
+                    {initials}
                   </div>
-                  <p style={{ 
-                    margin: '0 0 8px', 
-                    fontSize: 13, 
-                    color: '#64748b',
-                    fontWeight: 500,
-                  }}>
-                    {contact.programTitle || 'General Inquiry'}
-                  </p>
-                  <div style={{ fontSize: 12, color: '#94a3b8' }}>
-                    <span style={{ 
-                      display: 'block',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
+                  
+                  {/* Content */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                      <p style={{ 
+                        margin: 0, 
+                        fontWeight: 600,
+                        fontSize: 15,
+                        color: '#0f172a',
+                      }}>
+                        {contact.studentName || 'Unnamed student'}
+                      </p>
+                      {contact.unreadCount > 0 && (
+                        <span
+                          style={{
+                            backgroundColor: '#1e40af',
+                            color: '#ffffff',
+                            borderRadius: 10,
+                            padding: '2px 8px',
+                            fontSize: 11,
+                            fontWeight: 600,
+                            minWidth: 20,
+                            textAlign: 'center',
+                            flexShrink: 0,
+                            marginLeft: '8px',
+                          }}
+                        >
+                          {contact.unreadCount}
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ 
+                      margin: '0 0 8px', 
+                      fontSize: 13, 
+                      color: '#64748b',
+                      fontWeight: 500,
                     }}>
-                      {typeof contact.lastMessage === 'string' 
-                        ? contact.lastMessage 
-                        : (typeof contact.lastMessage === 'object' 
-                          ? (contact.lastMessage?.text || contact.lastMessage?.message || 'No messages yet')
-                          : 'No messages yet')}
-                    </span>
+                      {contact.programTitle || 'General Inquiry'}
+                    </p>
+                    {lastMessageText !== 'No messages yet' ? (
+                      <div style={{ 
+                        fontSize: 12, 
+                        color: '#ffffff',
+                        backgroundColor: '#1f2937',
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        display: 'inline-block',
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {lastMessageText}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                        {lastMessageText}
+                      </div>
+                    )}
                   </div>
                 </button>
               )
@@ -1597,7 +1649,7 @@ export default function ChatPage() {
                       }
                     }}
                     style={{
-                      backgroundColor: (messageText.trim() && !loadingMessages && !isSending) ? '#1e40af' : '#cbd5e1',
+                      backgroundColor: (messageText.trim() && !loadingMessages && !isSending) ? '#1f2937' : '#cbd5e1',
                       color: '#ffffff',
                       border: 'none',
                       borderRadius: 4,
@@ -1611,13 +1663,13 @@ export default function ChatPage() {
                     }}
                     onMouseEnter={(e) => {
                       if (messageText.trim() && !loadingMessages && !isSending) {
-                        e.currentTarget.style.backgroundColor = '#1e3a8a'
+                        e.currentTarget.style.backgroundColor = '#111827'
                         e.currentTarget.style.opacity = '1'
                       }
                     }}
                     onMouseLeave={(e) => {
                       if (messageText.trim() && !loadingMessages && !isSending) {
-                        e.currentTarget.style.backgroundColor = '#1e40af'
+                        e.currentTarget.style.backgroundColor = '#1f2937'
                         e.currentTarget.style.opacity = '1'
                       }
                     }}
